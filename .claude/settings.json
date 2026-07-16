@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find supabase *)",
+      "Bash(find src *)",
+      "Bash(wc -l .env.local)",
+      "Bash(awk -F= '{print $1\"=\"}' .env.local)",
+      "Bash(node -e \"console.log\\(require\\('@supabase/postgrest-js/package.json'\\).version\\)\")"
+    ]
+  }
+}

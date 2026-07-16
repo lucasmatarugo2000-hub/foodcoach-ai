@@ -1,0 +1,184 @@
+export type Goal = 'lose_weight' | 'gain_muscle' | 'maintenance' | 'reeducation'
+export type CoachingStyle = 'direct' | 'gentle'
+export type MealType = 'cafe_da_manha' | 'lanche_manha' | 'almoco' | 'lanche_tarde' | 'jantar' | 'ceia'
+export type DietStatus = 'on_track' | 'close' | 'diverged' | 'no_diet'
+export type CoachMessageType = 'comment' | 'question' | 'pattern_insight' | 'substitution' | 'system'
+export type CoachSender = 'kai' | 'user'
+export type KaiState = 'idle' | 'talking' | 'thinking'
+export type UserRole = 'client' | 'nutritionist'
+
+export interface UserProfile {
+  id: string
+  goal: Goal | null
+  current_weight: number | null
+  target_weight: number | null
+  daily_calories_goal: number | null
+  coaching_style: CoachingStyle
+  onboarding_completed: boolean
+  role: UserRole
+  created_at: string
+}
+
+export interface DietFood {
+  name: string
+  quantity: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+}
+
+export interface DietMeal {
+  meal_type: MealType
+  time_reference: string
+  foods: DietFood[]
+  total_calories: number
+}
+
+export interface DietMealsJson {
+  meals: DietMeal[]
+  daily_total_calories: number
+  observations: string
+}
+
+export interface DietPlan {
+  id: string
+  user_id: string
+  raw_text: string | null
+  meals_json: DietMealsJson
+  created_at: string
+  is_active: boolean
+}
+
+export interface DietComparison {
+  prescribed_meal: string
+  status: DietStatus
+  calories_diff: number
+  notes: string
+}
+
+export interface Meal {
+  id: string
+  user_id: string
+  photo_url: string | null
+  food_name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  meal_type: MealType | null
+  eaten_at: string
+  confirmed: boolean
+  diet_comparison: DietComparison | null
+}
+
+export interface CoachMessage {
+  id: string
+  user_id: string
+  meal_id: string | null
+  message: string
+  type: CoachMessageType
+  sender: CoachSender
+  created_at: string
+}
+
+export interface AnalyzeMealResult {
+  food_name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  portion: string
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface ReadDietResult {
+  meals: DietMeal[]
+  daily_total_calories: number
+  observations: string
+  error?: 'not_a_diet'
+}
+
+export interface Substitution {
+  name: string
+  quantity: string
+  calories: number
+  reason: string
+}
+
+export interface SuggestSubstitutionResult {
+  substitutions: Substitution[]
+}
+
+// v2.0 — nutritionist area ---------------------------------------------------
+
+export interface Nutritionist {
+  id: string
+  user_id: string
+  nome: string
+  crn: string | null
+  clinic_name: string | null
+  created_at: string
+}
+
+export type ClientLinkStatus = 'active' | 'inactive'
+
+export interface ClientNutritionist {
+  id: string
+  client_id: string
+  nutritionist_id: string
+  status: ClientLinkStatus
+  created_at: string
+}
+
+export type RecommendationType = 'recipe' | 'substitution' | 'tip' | 'orientation'
+
+export interface Recommendation {
+  id: string
+  nutritionist_id: string
+  client_id: string | null
+  type: RecommendationType
+  title: string
+  content: string
+  created_at: string
+}
+
+export interface Bioimpedance {
+  id: string
+  user_id: string
+  date: string
+  weight: number | null
+  body_fat_pct: number | null
+  muscle_mass: number | null
+  bone_mass: number | null
+  water_pct: number | null
+  visceral_fat: number | null
+  bmr: number | null
+  bmi: number | null
+  raw_text: string | null
+  photo_url: string | null
+  created_at: string
+}
+
+export interface ReadBioimpedanceResult {
+  date: string | null
+  weight: number | null
+  body_fat_pct: number | null
+  muscle_mass: number | null
+  bone_mass: number | null
+  water_pct: number | null
+  visceral_fat: number | null
+  bmr: number | null
+  bmi: number | null
+  raw_text: string | null
+  error?: 'not_bioimpedance'
+}
+
+export interface ClientSummary {
+  client_id: string
+  email: string
+  profile: UserProfile | null
+  last_meal_at: string | null
+  adherence_pct: number | null
+  linked_at: string
+}
