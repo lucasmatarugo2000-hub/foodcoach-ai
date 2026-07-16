@@ -3,11 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --color-background: 15 15 15;
-  --color-card: 26 26 26;
-  --color-border: 42 42 42;
-  --color-primary: 34 197 94;
-  --color-foreground: 255 255 255;
+  --color-background: 13 17 23;
+  --color-card: 22 27 34;
+  --color-border: 33 38 45;
+  --color-primary: 0 212 170;
+  --color-secondary: 124 58 237;
+  --color-accent: 245 158 11;
+  --color-foreground: 230 237 243;
+  --color-foreground-secondary: 139 148 158;
   color-scheme: dark;
 
   /* chart categorical series — fixed order, CVD-validated (see dataviz skill) */
@@ -15,30 +18,27 @@
   --chart-2: #199e70; /* aqua */
   --chart-3: #9085e9; /* violet */
   --chart-4: #d95926; /* orange */
-  --chart-neutral: #898781; /* muted reference/goal lines */
-  --chart-grid: #2c2c2a;
-
-  --hero-from: #052e16;
-  --hero-to: #14532d;
+  --chart-neutral: #8b949e; /* muted reference/goal lines */
+  --chart-grid: #21262d;
 }
 
 :root.light {
-  --color-background: 249 250 251;
+  --color-background: 240 244 255;
   --color-card: 255 255 255;
-  --color-border: 229 231 235;
-  --color-primary: 22 163 74;
-  --color-foreground: 17 24 39;
+  --color-border: 221 227 245;
+  --color-primary: 0 184 148;
+  --color-secondary: 109 40 217;
+  --color-accent: 245 158 11;
+  --color-foreground: 26 26 46;
+  --color-foreground-secondary: 100 116 139;
   color-scheme: light;
 
   --chart-1: #2a78d6;
   --chart-2: #1baf7a;
   --chart-3: #4a3aa7;
   --chart-4: #eb6834;
-  --chart-neutral: #898781;
-  --chart-grid: #e1e0d9;
-
-  --hero-from: #ecfdf5;
-  --hero-to: #bbf7d0;
+  --chart-neutral: #64748b;
+  --chart-grid: #dde3f5;
 }
 
 html,
@@ -71,4 +71,22 @@ select {
 ::-webkit-scrollbar-thumb {
   background-color: rgb(var(--color-border));
   border-radius: 999px;
+}
+
+.gradient-text {
+  background-image: linear-gradient(90deg, rgb(var(--color-primary)), rgb(var(--color-secondary)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Rotating conic gradient ring, used behind the Kai avatar on /coach */
+.gradient-ring {
+  background-image: conic-gradient(
+    from 0deg,
+    rgb(var(--color-primary)),
+    rgb(var(--color-secondary)),
+    rgb(var(--color-accent)),
+    rgb(var(--color-primary))
+  );
 }

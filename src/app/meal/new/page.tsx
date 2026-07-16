@@ -317,7 +317,11 @@ export default function NewMealPage() {
               {comparison && comparison.status !== 'no_diet' && (
                 <div className="mt-4 rounded-xl border border-border p-3">
                   <div className="mb-1 flex items-center gap-2 text-sm font-medium">
-                    <span>{statusBadge(comparison.status).emoji}</span>
+                    {(() => {
+                      const badge = statusBadge(comparison.status)
+                      const BadgeIcon = badge.Icon
+                      return <BadgeIcon size={18} style={{ color: badge.color }} />
+                    })()}
                     <span>{statusBadge(comparison.status).label}</span>
                   </div>
                   <p className="text-xs text-white/60">Prescrito: {comparison.prescribed_meal}</p>

@@ -187,13 +187,22 @@ export default function CoachPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[#f8fafc] pb-24 dark:bg-background">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
-      <div className="flex flex-col items-center px-4 pb-2 pt-8">
-        <KaiAvatar state={kaiState} size={148} />
-        <h2 className="mt-4 text-lg font-bold">
+      <div
+        className="flex flex-col items-center rounded-b-3xl px-4 pb-6 pt-10"
+        style={{ background: 'linear-gradient(90deg, rgb(var(--color-primary)) 0%, rgb(var(--color-secondary)) 100%)' }}
+      >
+        <div className="relative h-[154px] w-[154px]">
+          <div className="absolute inset-0 animate-spin-slow rounded-full gradient-ring" />
+          <div className="absolute inset-[3px] rounded-full bg-card" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <KaiAvatar state={kaiState} size={138} />
+          </div>
+        </div>
+        <h2 className="mt-4 text-lg font-extrabold tracking-tight text-[#ffffff]">
           {greetingPrefix()}
           {name ? `, ${name}` : ''}!
         </h2>
-        <p className="text-sm text-white/50">Como posso te ajudar hoje?</p>
+        <p className="text-sm text-[#ffffff]/80">Como posso te ajudar hoje?</p>
       </div>
 
       <div ref={scrollRef} className="mt-4 flex-1 space-y-3 overflow-y-auto px-4">

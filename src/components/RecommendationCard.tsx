@@ -2,7 +2,7 @@ import { formatDateFull } from '@/lib/format'
 import type { Recommendation, RecommendationType } from '@/types'
 
 const TYPE_META: Record<RecommendationType, { label: string; color: string }> = {
-  recipe: { label: 'Receita', color: '#22c55e' },
+  recipe: { label: 'Receita', color: '#00d4aa' },
   substitution: { label: 'Substituição', color: '#38bdf8' },
   tip: { label: 'Dica', color: '#eab308' },
   orientation: { label: 'Orientação', color: '#a78bfa' },

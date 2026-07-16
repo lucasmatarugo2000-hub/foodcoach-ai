@@ -82,6 +82,31 @@ export interface BioimpedancePoint {
   muscle_mass: number | null
 }
 
+/**
+ * No per-macro goal is stored — derive sensible gram targets from the daily
+ * calorie goal using a standard 30% protein / 40% carb / 30% fat split
+ * (protein/carb = 4 kcal/g, fat = 9 kcal/g).
+ */
+export function deriveMacroTargets(calorieGoal: number): MacroAverages {
+  return {
+    protein: Math.round((calorieGoal * 0.3) / 4),
+    carbs: Math.round((calorieGoal * 0.4) / 4),
+    fat: Math.round((calorieGoal * 0.3) / 9),
+  }
+}
+
+/** Consecutive days (counting back from `today`) with at least one logged meal. */
+export function computeStreak(meals: Meal[], today: Date = new Date()): number {
+  const daysWithMeals = new Set(meals.map((m) => dateKey(new Date(m.eaten_at))))
+  let streak = 0
+  const cursor = new Date(today)
+  while (daysWithMeals.has(dateKey(cursor))) {
+    streak += 1
+    cursor.setDate(cursor.getDate() - 1)
+  }
+  return streak
+}
+
 export function bioimpedanceSeries(records: Bioimpedance[]): BioimpedancePoint[] {
   return records
     .slice()

@@ -4,8 +4,8 @@
   "description": "Seu coach de alimentação com IA",
   "start_url": "/home",
   "display": "standalone",
-  "background_color": "#0f0f0f",
-  "theme_color": "#14532d",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
   "orientation": "portrait",
   "icons": [
     {

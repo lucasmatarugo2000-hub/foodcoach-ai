@@ -103,8 +103,8 @@ export default function KaiAvatar({ state, size = 120 }: KaiAvatarProps) {
       >
         <defs>
           <radialGradient id={`kai-bg-${uid}`} cx="50%" cy="45%" r="65%">
-            <stop offset="0%" stopColor="#22c55e" />
-            <stop offset="100%" stopColor="#14532d" />
+            <stop offset="0%" stopColor="#00d4aa" />
+            <stop offset="100%" stopColor="#00695c" />
           </radialGradient>
         </defs>
 
@@ -120,12 +120,12 @@ export default function KaiAvatar({ state, size = 120 }: KaiAvatarProps) {
 
         {/* leaf icon, bottom-right corner */}
         <g transform="translate(88, 88)">
-          <circle r="13" fill="#0f0f0f" opacity="0.25" />
+          <circle r="13" fill="#0d1117" opacity="0.25" />
           <path
             d="M0,7 C-6,7 -8,1 -6,-6 C1,-8 7,-4 7,2 C7,5 4,7 0,7 Z"
-            fill="#4ade80"
+            fill="#5eead4"
           />
-          <path d="M-5,-5 L4,4" stroke="#14532d" strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M-5,-5 L4,4" stroke="#00695c" strokeWidth="1.2" strokeLinecap="round" />
         </g>
 
         {/* head group */}

@@ -1,3 +1,4 @@
+import { CheckCircle2, AlertCircle, XCircle, Circle, type LucideIcon } from 'lucide-react'
 import type { DietStatus, MealType } from '@/types'
 
 export const MEAL_TYPE_LABELS: Record<MealType, string> = {
@@ -14,16 +15,16 @@ export function mealTypeLabel(type: MealType | string | null | undefined): strin
   return MEAL_TYPE_LABELS[type as MealType] ?? type
 }
 
-export function statusBadge(status: DietStatus | null | undefined): { emoji: string; color: string; label: string } {
+export function statusBadge(status: DietStatus | null | undefined): { Icon: LucideIcon; color: string; label: string } {
   switch (status) {
     case 'on_track':
-      return { emoji: '✅', color: '#22c55e', label: 'Na linha' }
+      return { Icon: CheckCircle2, color: '#00d4aa', label: 'Na linha' }
     case 'close':
-      return { emoji: '🟡', color: '#eab308', label: 'Próximo' }
+      return { Icon: AlertCircle, color: '#f59e0b', label: 'Próximo' }
     case 'diverged':
-      return { emoji: '🔴', color: '#ef4444', label: 'Divergiu' }
+      return { Icon: XCircle, color: '#ef4444', label: 'Divergiu' }
     default:
-      return { emoji: '⚪', color: '#94a3b8', label: 'Sem dieta' }
+      return { Icon: Circle, color: '#8b949e', label: 'Sem dieta' }
   }
 }
 
@@ -53,14 +54,6 @@ export function greetingPrefix(date: Date = new Date()): string {
   if (hour >= 5 && hour < 12) return 'Bom dia'
   if (hour >= 12 && hour < 18) return 'Boa tarde'
   return 'Boa noite'
-}
-
-/** ☀️ (5h–12h) / 🌤️ (12h–18h) / 🌙 (18h–5h) */
-export function greetingEmoji(date: Date = new Date()): string {
-  const hour = date.getHours()
-  if (hour >= 5 && hour < 12) return '☀️'
-  if (hour >= 12 && hour < 18) return '🌤️'
-  return '🌙'
 }
 
 /** No display-name field exists for clients — derive a friendly one from the email. */

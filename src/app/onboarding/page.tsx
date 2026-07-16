@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Zap, Dumbbell, Scale, Leaf, User, Stethoscope, type LucideIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import KaiAvatar from '@/components/KaiAvatar'
 import ThemeToggle from '@/components/ThemeToggle'
 import type { CoachingStyle, Goal, UserRole } from '@/types'
 
-const GOALS: { value: Goal; label: string; emoji: string }[] = [
-  { value: 'lose_weight', label: 'Emagrecer', emoji: '⚡' },
-  { value: 'gain_muscle', label: 'Ganhar massa', emoji: '💪' },
-  { value: 'maintenance', label: 'Manutenção', emoji: '⚖️' },
-  { value: 'reeducation', label: 'Reeducação alimentar', emoji: '🌱' },
+const GOALS: { value: Goal; label: string; Icon: LucideIcon }[] = [
+  { value: 'lose_weight', label: 'Emagrecer', Icon: Zap },
+  { value: 'gain_muscle', label: 'Ganhar massa', Icon: Dumbbell },
+  { value: 'maintenance', label: 'Manutenção', Icon: Scale },
+  { value: 'reeducation', label: 'Reeducação alimentar', Icon: Leaf },
 ]
 
 const STYLES: { value: CoachingStyle; label: string; description: string }[] = [
@@ -167,7 +168,7 @@ export default function OnboardingPage() {
                   role === 'client' ? 'border-primary bg-primary/10' : 'border-border bg-card'
                 }`}
               >
-                <div className="mb-1 text-2xl">🙋</div>
+                <User size={26} className="mb-1 text-primary" />
                 <div className="text-sm font-semibold">Sou cliente</div>
                 <div className="text-xs text-white/60">Quero registrar refeições e acompanhar minha evolução.</div>
               </button>
@@ -177,7 +178,7 @@ export default function OnboardingPage() {
                   role === 'nutritionist' ? 'border-primary bg-primary/10' : 'border-border bg-card'
                 }`}
               >
-                <div className="mb-1 text-2xl">🩺</div>
+                <Stethoscope size={26} className="mb-1 text-primary" />
                 <div className="text-sm font-semibold">Sou nutricionista</div>
                 <div className="text-xs text-white/60">Quero acompanhar meus clientes e enviar recomendações.</div>
               </button>
@@ -238,7 +239,7 @@ export default function OnboardingPage() {
                     goal === g.value ? 'border-primary bg-primary/10' : 'border-border bg-card'
                   }`}
                 >
-                  <div className="mb-2 text-2xl">{g.emoji}</div>
+                  <g.Icon size={26} className="mb-2 text-primary" />
                   <div className="text-sm font-medium">{g.label}</div>
                 </button>
               ))}

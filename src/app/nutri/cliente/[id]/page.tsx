@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { UtensilsCrossed } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { adherencePct, bioimpedanceSeries, caloriesByDay, macroAverages } from '@/lib/charts'
 import { CHART_COLORS, chartTooltipStyle } from '@/lib/chartTheme'
@@ -436,14 +437,15 @@ export default function NutriClientPage({ params }: { params: { id: string } }) 
 
 function MealRow({ meal, showMacros = false }: { meal: Meal; showMacros?: boolean }) {
   const badge = statusBadge(meal.diet_comparison?.status)
+  const BadgeIcon = badge.Icon
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3">
-      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-border">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-border">
         {meal.photo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={meal.photo_url} alt={meal.food_name} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center">🍽️</div>
+          <UtensilsCrossed size={18} className="text-muted" />
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -453,9 +455,7 @@ function MealRow({ meal, showMacros = false }: { meal: Meal; showMacros?: boolea
           {showMacros && ` · P${meal.protein}g C${meal.carbs}g G${meal.fat}g`}
         </div>
       </div>
-      <span title={badge.label} className="text-lg">
-        {badge.emoji}
-      </span>
+      <BadgeIcon size={20} style={{ color: badge.color }} aria-label={badge.label} />
     </div>
   )
 }

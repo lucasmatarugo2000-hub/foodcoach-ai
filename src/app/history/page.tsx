@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { UtensilsCrossed } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateFull, formatTime, mealTypeLabel, statusBadge } from '@/lib/format'
 import BottomNav from '@/components/BottomNav'
@@ -91,17 +92,18 @@ export default function HistoryPage() {
                 <div className="flex flex-col gap-2">
                   {dayMeals.map((meal) => {
                     const badge = statusBadge(meal.diet_comparison?.status)
+                    const BadgeIcon = badge.Icon
                     return (
                       <div
                         key={meal.id}
                         className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3"
                       >
-                        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-border">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-border">
                           {meal.photo_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={meal.photo_url} alt={meal.food_name} className="h-full w-full object-cover" />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center">🍽️</div>
+                            <UtensilsCrossed size={18} className="text-muted" />
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -110,7 +112,7 @@ export default function HistoryPage() {
                             {mealTypeLabel(meal.meal_type)} · {formatTime(meal.eaten_at)} · {meal.calories} kcal
                           </div>
                         </div>
-                        <span className="text-lg">{badge.emoji}</span>
+                        <BadgeIcon size={20} style={{ color: badge.color }} aria-label={badge.label} />
                       </div>
                     )
                   })}
