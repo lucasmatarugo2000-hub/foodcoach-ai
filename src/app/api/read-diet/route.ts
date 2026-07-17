@@ -18,6 +18,7 @@ const BILLING_ERROR_MESSAGE = 'Serviço de leitura de dieta temporariamente indi
 const NOT_A_DIET_MESSAGE =
   'Não conseguimos identificar uma dieta neste arquivo. Tente enviar uma foto mais nítida ou um PDF diferente.'
 const UNREADABLE_PDF_MESSAGE = 'Não conseguimos ler esse PDF. Tente enviar uma foto da dieta em vez disso.'
+const EMPTY_PDF_TEXT_MESSAGE = 'Não foi possível extrair texto deste PDF'
 const GENERIC_ERROR_MESSAGE = 'Não foi possível ler a dieta agora. Tente novamente em instantes.'
 
 const DIET_JSON_SCHEMA = `Retorne APENAS JSON válido sem markdown:
@@ -25,9 +26,29 @@ const DIET_JSON_SCHEMA = `Retorne APENAS JSON válido sem markdown:
 Use para meal_type: cafe_da_manha, lanche_manha, almoco, lanche_tarde, jantar, ceia.
 Se calorias não estiverem explícitas, estime. Se não for uma dieta, retorne { "error": "not_a_diet" }.`
 
+const MAX_PDF_TEXT_LENGTH = 50000
+
 function base64Payload(dataUrl: string): string {
   const commaIdx = dataUrl.indexOf(',')
   return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl
+}
+
+/**
+ * Some PDFs' custom/embedded font encodings make pdf.js emit NUL and other
+ * control characters instead of the real glyphs — the Anthropic API rejects
+ * those as invalid message content. Strip everything below code point 32
+ * except tab/newline/CR, plus DEL, without relying on unicode-escape regex
+ * literals (those have a habit of getting mangled by tooling round-trips).
+ */
+function sanitizePdfText(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    const isAllowedWhitespace = code === 9 || code === 10 || code === 13
+    const isControl = (code < 32 && !isAllowedWhitespace) || code === 127
+    out += isControl ? ' ' : text[i]
+  }
+  return out
 }
 
 /** Image path: send the photo straight to GPT-4o Vision (unchanged from before). */
@@ -62,7 +83,9 @@ async function readDietFromImage(dataUrl: string): Promise<string> {
  * PDF path: extract raw text with unpdf — a pdf.js build made for
  * edge/serverless runtimes (no DOM, no canvas, no native deps — unlike
  * pdf-parse, which reaches for `DOMMatrix` and crashes on Vercel) — and hand
- * the text to Claude to structure.
+ * the text to Claude to structure. `pdfText` is already sanitized/clamped by
+ * the caller. `content` is a plain string, which is the correct shorthand
+ * for a single text block on the Anthropic Messages API.
  */
 async function readDietFromPdfText(pdfText: string): Promise<string> {
   const anthropic = getAnthropicClient()
@@ -120,15 +143,22 @@ export async function POST(request: Request) {
       let pdfText = ''
       try {
         const result = await extractText(new Uint8Array(buffer), { mergePages: true })
-        pdfText = result.text?.trim() ?? ''
+        pdfText = sanitizePdfText(result.text ?? '').trim()
       } catch (pdfErr) {
         console.error('read-diet: failed to parse PDF —', pdfErr)
         return NextResponse.json({ error: UNREADABLE_PDF_MESSAGE }, { status: 422 })
       }
 
-      if (!pdfText) {
-        return NextResponse.json({ error: 'not_a_diet', message: NOT_A_DIET_MESSAGE }, { status: 422 })
+      if (pdfText.length === 0) {
+        return NextResponse.json({ error: EMPTY_PDF_TEXT_MESSAGE }, { status: 422 })
       }
+
+      if (pdfText.length > MAX_PDF_TEXT_LENGTH) {
+        console.log(`read-diet: PDF text truncated from ${pdfText.length} to ${MAX_PDF_TEXT_LENGTH} chars`)
+        pdfText = pdfText.slice(0, MAX_PDF_TEXT_LENGTH)
+      }
+
+      console.log('read-diet: texto extraído:', pdfText.substring(0, 200))
 
       raw = await readDietFromPdfText(pdfText)
     } else {
@@ -163,27 +193,32 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result)
   } catch (err) {
-    // Billing/quota issues surface as 429 (RateLimitError, e.g. "insufficient_quota")
-    // or occasionally 403 (PermissionDeniedError) depending on the account restriction.
-    // Both the OpenAI (image path) and Anthropic (PDF path) SDKs need handling here.
+    // Billing/quota issues can surface as 429 (RateLimitError), 403
+    // (PermissionDeniedError), 401 (AuthenticationError) — OR, notably, as a
+    // plain 400 BadRequestError with an "invalid_request_error" body saying
+    // "Your credit balance is too low" (this is the actual shape Anthropic
+    // uses for insufficient-credit errors). All of those are billing, not a
+    // generic bad request. Both the OpenAI (image path) and Anthropic (PDF
+    // path) SDKs need handling here.
     if (err instanceof OpenAI.RateLimitError || err instanceof OpenAI.PermissionDeniedError || err instanceof OpenAI.AuthenticationError) {
       console.error('read-diet: OpenAI billing/auth error —', err.status, err.code, err.message)
       return NextResponse.json({ error: BILLING_ERROR_MESSAGE }, { status: 500 })
     }
     if (err instanceof OpenAI.APIError) {
-      console.error('read-diet: OpenAI API error —', err.status, err.code, err.type, err.message)
+      console.error('read-diet: OpenAI API error —', err.status, err.code, err.type, 'body:', JSON.stringify(err.error ?? err.message))
       return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 500 })
     }
     if (
       err instanceof Anthropic.RateLimitError ||
       err instanceof Anthropic.PermissionDeniedError ||
-      err instanceof Anthropic.AuthenticationError
+      err instanceof Anthropic.AuthenticationError ||
+      err instanceof Anthropic.BadRequestError
     ) {
-      console.error('read-diet: Anthropic billing/auth error —', err.status, err.message)
+      console.error('read-diet: Anthropic billing/auth error —', err.status, 'body:', JSON.stringify(err.error ?? err.message))
       return NextResponse.json({ error: BILLING_ERROR_MESSAGE }, { status: 500 })
     }
     if (err instanceof Anthropic.APIError) {
-      console.error('read-diet: Anthropic API error —', err.status, err.message)
+      console.error('read-diet: Anthropic API error —', err.status, 'body:', JSON.stringify(err.error ?? err.message))
       return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 500 })
     }
     console.error('read-diet: unexpected error', err)
