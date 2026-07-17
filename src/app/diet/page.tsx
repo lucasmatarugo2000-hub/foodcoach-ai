@@ -197,7 +197,7 @@ export default function DietPage() {
                   <h3 className="font-semibold">{mealTypeLabel(meal.meal_type)}</h3>
                   <span className="text-xs text-white/50">{meal.time_reference}</span>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 overflow-x-hidden">
                   {meal.foods.map((food, fIdx) => (
                     <div key={fIdx} className="flex items-center gap-1.5">
                       <input
@@ -208,13 +208,13 @@ export default function DietPage() {
                       <input
                         value={food.quantity}
                         onChange={(e) => updateFoodField(mIdx, fIdx, 'quantity', e.target.value)}
-                        className="w-20 shrink-0 rounded-lg px-1.5 py-1.5 text-xs"
+                        className="max-w-[100px] shrink-0 whitespace-nowrap rounded-lg px-1.5 py-1.5 text-right text-xs"
                       />
                       <input
                         type="number"
                         value={food.calories}
                         onChange={(e) => updateFoodField(mIdx, fIdx, 'calories', e.target.value)}
-                        className="w-[60px] shrink-0 rounded-lg bg-primary/15 px-1 py-1.5 text-center text-xs font-semibold text-primary"
+                        className="w-[50px] shrink-0 whitespace-nowrap rounded-lg px-1 py-1.5 text-right text-xs font-bold"
                       />
                     </div>
                   ))}
