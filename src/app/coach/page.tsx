@@ -57,13 +57,16 @@ export default function CoachPage() {
       }
       setName(displayNameFromEmail(user.email))
 
+      const startOfDay = new Date()
+      startOfDay.setHours(0, 0, 0, 0)
+
       const [{ data: messages }, { data: diet }, { data: profile }] = await Promise.all([
         supabase
           .from('coach_messages')
           .select('*')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: true })
-          .limit(50),
+          .gte('created_at', startOfDay.toISOString())
+          .order('created_at', { ascending: true }),
         supabase
           .from('diet_plans')
           .select('meals_json')
@@ -133,6 +136,22 @@ export default function CoachPage() {
           ? prescribed.foods.map((f) => `${f.name} ${f.quantity}`).join(', ')
           : 'sua refeição atual'
 
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        // Persist the user's message before calling the API so it survives
+        // even if suggest-substitution subsequently fails.
+        if (user) {
+          await supabase.from('coach_messages').insert({
+            user_id: user.id,
+            message: text,
+            type: 'substitution',
+            sender: 'user',
+            role: 'user',
+          })
+        }
+
         const res = await fetch('/api/suggest-substitution', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -141,17 +160,7 @@ export default function CoachPage() {
         const data = await res.json()
         const substitutions: Substitution[] = data.substitutions ?? []
 
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
         if (user) {
-          await supabase.from('coach_messages').insert({
-            user_id: user.id,
-            message: text,
-            type: 'substitution',
-            sender: 'user',
-          })
           const summary = substitutions
             .map((s) => `${s.name} (${s.quantity}) — ${s.calories} kcal: ${s.reason}`)
             .join('\n')
@@ -160,6 +169,7 @@ export default function CoachPage() {
             message: summary || 'Não encontrei boas substituições agora — pode tentar detalhar mais?',
             type: 'substitution',
             sender: 'kai',
+            role: 'assistant',
           })
         }
 
@@ -194,7 +204,7 @@ export default function CoachPage() {
       }
 
       const extraction = await extractionPromise
-      if (extraction?.extracted && extraction.message) {
+      if ((extraction?.extracted || extraction?.success) && extraction.message) {
         setItems((prev) => [
           ...prev,
           { kind: 'health_confirmation', id: `health-${Date.now()}`, message: extraction.message as string },
@@ -223,10 +233,10 @@ export default function CoachPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f8fafc] pb-24 dark:bg-background">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#f8fafc] pb-16 dark:bg-background">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
       <div
-        className="flex flex-col items-center rounded-b-3xl px-4 pb-6 pt-10"
+        className="shrink-0 flex flex-col items-center rounded-b-3xl px-4 pb-6 pt-10"
         style={{ background: 'linear-gradient(90deg, rgb(var(--color-primary)) 0%, rgb(var(--color-secondary)) 100%)' }}
       >
         <div className="relative h-[154px] w-[154px]">
@@ -243,7 +253,7 @@ export default function CoachPage() {
         <p className="text-sm text-[#ffffff]/80">Como posso te ajudar hoje?</p>
       </div>
 
-      <div ref={scrollRef} className="mt-4 flex-1 space-y-3 overflow-y-auto px-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {loading ? (
           <p className="text-center text-sm text-white/40">Carregando conversa...</p>
         ) : items.length === 0 ? (
@@ -272,7 +282,7 @@ export default function CoachPage() {
         )}
       </div>
 
-      <div className="fixed bottom-16 left-0 right-0 z-40 border-t border-border bg-[#f8fafc] px-4 py-3 dark:bg-background">
+      <div className="shrink-0 border-t border-border bg-[#f8fafc] px-4 py-3 dark:bg-background">
         <div className="mx-auto flex max-w-md gap-2">
           <input
             value={input}

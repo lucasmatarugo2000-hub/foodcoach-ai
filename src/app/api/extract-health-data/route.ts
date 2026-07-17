@@ -190,7 +190,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ extracted: false })
     }
 
-    return NextResponse.json({ extracted: true, data: saved, message: buildConfirmationMessage(data) })
+    return NextResponse.json({
+      extracted: true,
+      success: true,
+      data: saved,
+      saved,
+      message: buildConfirmationMessage(data),
+    })
   } catch (err) {
     if (
       err instanceof Anthropic.RateLimitError ||

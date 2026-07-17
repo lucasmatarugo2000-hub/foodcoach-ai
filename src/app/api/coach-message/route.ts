@@ -198,6 +198,22 @@ export async function POST(request: Request) {
     turnText = `Aqui estão minhas últimas refeições: ${summary || 'nenhuma refeição registrada ainda'}. O que você acha?`
   }
 
+  // Persist the user's message immediately — before calling Anthropic — so it
+  // survives even when the downstream AI call fails (billing/rate-limit/etc).
+  if (body.user_message) {
+    const { error: userInsertError } = await supabase.from('coach_messages').insert({
+      user_id: user.id,
+      meal_id: body.meal_id ?? null,
+      message: body.user_message,
+      type: 'comment',
+      sender: 'user',
+      role: 'user',
+    })
+    if (userInsertError) {
+      console.error('coach_messages user insert error', userInsertError)
+    }
+  }
+
   try {
     const anthropic = getAnthropicClient()
     const response = await anthropic.messages.create({
@@ -210,16 +226,6 @@ export async function POST(request: Request) {
     const textBlock = response.content.find((b) => b.type === 'text')
     const kaiMessage = textBlock && textBlock.type === 'text' ? textBlock.text : ''
 
-    if (body.user_message) {
-      await supabase.from('coach_messages').insert({
-        user_id: user.id,
-        meal_id: body.meal_id ?? null,
-        message: body.user_message,
-        type: 'comment',
-        sender: 'user',
-      })
-    }
-
     const { data: saved, error: saveError } = await supabase
       .from('coach_messages')
       .insert({
@@ -228,6 +234,7 @@ export async function POST(request: Request) {
         message: kaiMessage,
         type: 'comment',
         sender: 'kai',
+        role: 'assistant',
       })
       .select()
       .single()

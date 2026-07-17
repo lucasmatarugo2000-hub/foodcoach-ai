@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Footprints } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
+import SaveButton from './SaveButton'
 import { DEFAULT_STEPS_GOAL } from '@/lib/health'
 import type { HealthLog } from '@/types'
 
@@ -13,9 +14,17 @@ interface StepsCardProps {
 
 export default function StepsCard({ log, onSave }: StepsCardProps) {
   const [steps, setSteps] = useState(log?.steps?.toString() ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   async function commit() {
-    await onSave({ steps: steps ? Number(steps) || null : null })
+    setSaving(true)
+    const ok = await onSave({ steps: steps ? Number(steps) || null : null })
+    setSaving(false)
+    if (ok) {
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    }
   }
 
   const value = log?.steps ?? 0
@@ -27,7 +36,6 @@ export default function StepsCard({ log, onSave }: StepsCardProps) {
         type="number"
         value={steps}
         onChange={(e) => setSteps(e.target.value)}
-        onBlur={commit}
         placeholder="0"
         className="w-full rounded-lg px-2 py-2 text-sm"
       />
@@ -37,6 +45,7 @@ export default function StepsCard({ log, onSave }: StepsCardProps) {
       <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-border">
         <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
       </div>
+      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { Smile } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
+import SaveButton from './SaveButton'
 import type { HealthLog } from '@/types'
 
 // One mouth curve per mood level, 1 (very sad) through 5 (very happy).
@@ -40,6 +42,26 @@ interface MoodEnergyCardProps {
 }
 
 export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
+  const [mood, setMood] = useState(log?.mood ?? 0)
+  const [energy, setEnergy] = useState(log?.energy ?? 0)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function commit() {
+    const fields: Partial<HealthLog> = {}
+    if (mood > 0) fields.mood = mood
+    if (energy > 0) fields.energy = energy
+    if (Object.keys(fields).length === 0) return
+
+    setSaving(true)
+    const ok = await onSave(fields)
+    setSaving(false)
+    if (ok) {
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    }
+  }
+
   return (
     <HealthCardShell
       icon={<Smile size={16} className="text-primary" />}
@@ -49,7 +71,7 @@ export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
       <p className="mb-1.5 text-[11px] text-white/50">Humor</p>
       <div className="mb-3 flex justify-between px-1">
         {[1, 2, 3, 4, 5].map((n) => (
-          <MoodFace key={n} level={n} active={log?.mood === n} onClick={() => onSave({ mood: n })} />
+          <MoodFace key={n} level={n} active={mood === n} onClick={() => setMood(n)} />
         ))}
       </div>
       <p className="mb-1.5 text-[11px] text-white/50">Energia</p>
@@ -58,13 +80,14 @@ export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
           <button
             key={n}
             type="button"
-            onClick={() => onSave({ energy: n })}
+            onClick={() => setEnergy(n)}
             aria-label={`Energia ${n}`}
             className="h-2 flex-1 rounded-full transition-colors"
-            style={{ backgroundColor: (log?.energy ?? 0) >= n ? 'rgb(var(--color-primary))' : 'rgb(var(--color-border))' }}
+            style={{ backgroundColor: energy >= n ? 'rgb(var(--color-primary))' : 'rgb(var(--color-border))' }}
           />
         ))}
       </div>
+      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

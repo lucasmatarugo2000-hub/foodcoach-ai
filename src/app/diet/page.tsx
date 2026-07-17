@@ -30,12 +30,14 @@ export default function DietPage() {
       setLoading(false)
       return
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('diet_plans')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .returns<DietPlan[]>()
+    if (error) console.error('diet_plans query error', error)
+    console.log('Dietas carregadas:', data)
     setDiets(data ?? [])
     setLoading(false)
   }

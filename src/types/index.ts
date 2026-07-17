@@ -85,6 +85,7 @@ export interface CoachMessage {
   message: string
   type: CoachMessageType
   sender: CoachSender
+  role: 'user' | 'assistant'
   created_at: string
 }
 
@@ -234,7 +235,9 @@ export interface ExtractedHealthData {
 
 export interface ExtractHealthDataResult {
   extracted: boolean
+  success?: boolean
   data?: HealthLog
+  saved?: HealthLog
   message?: string
 }
 

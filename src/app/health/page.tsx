@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { DEFAULT_WATER_GOAL_ML } from '@/lib/health'
@@ -26,6 +27,7 @@ function formatHeaderDate(d: Date): string {
 }
 
 export default function HealthPage() {
+  const router = useRouter()
   const supabase = createClient()
   const [userId, setUserId] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(() => new Date())
@@ -87,6 +89,15 @@ export default function HealthPage() {
     return () => clearInterval(interval)
   }, [load])
 
+  useEffect(() => {
+    function onFocus() {
+      load(true)
+      router.refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [load, router])
+
   function changeDay(delta: number) {
     setSelectedDate((d) => {
       const next = new Date(d)
@@ -105,6 +116,7 @@ export default function HealthPage() {
       .single<HealthLog>()
     if (!error && data) {
       setLog(data)
+      router.refresh()
       return true
     }
     console.error('health_logs upsert error', error)
@@ -119,6 +131,7 @@ export default function HealthPage() {
       .select()
       .single<MenstrualCycle>()
     if (!error && data) {
+      router.refresh()
       setLatestCycle(data)
       return true
     }

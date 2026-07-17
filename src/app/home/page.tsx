@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   RadialBarChart,
   RadialBar,
@@ -21,25 +22,18 @@ import { isSameDay, mealTypeLabel, statusBadge, formatTime, greetingPrefix, disp
 import { caloriesByWeekday, deriveMacroTargets, computeStreak } from '@/lib/charts'
 import { CHART_COLORS, darkChartTooltipStyle } from '@/lib/chartTheme'
 import { getCoachInfo } from '@/lib/coach'
+import { motivationalQuoteOfTheDay } from '@/lib/motivational-quotes'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
 import RecommendationCard from '@/components/RecommendationCard'
 import type { CoachMessage, Meal, Recommendation, UserProfile } from '@/types'
 
-const MOTIVATIONAL_PHRASES = [
-  'Um passo de cada vez já é progresso.',
-  'Consistência vale mais que perfeição.',
-  'Seu corpo agradece cada escolha boa que você faz hoje.',
-  'Você não precisa ser perfeito, só precisa continuar.',
-]
-
 export default function HomePage() {
+  const router = useRouter()
   const supabase = createClient()
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [name, setName] = useState('')
-  const [motivationalPhrase] = useState(
-    () => MOTIVATIONAL_PHRASES[Math.floor(Math.random() * MOTIVATIONAL_PHRASES.length)] ?? MOTIVATIONAL_PHRASES[0]
-  )
+  const [motivationalPhrase] = useState(() => motivationalQuoteOfTheDay())
   const [todayMeals, setTodayMeals] = useState<Meal[]>([])
   const [recentMeals, setRecentMeals] = useState<Meal[]>([])
   const [lastMessage, setLastMessage] = useState<CoachMessage | null>(null)
@@ -48,59 +42,69 @@ export default function HomePage() {
   const coach = getCoachInfo(profile?.gender ?? null)
   const CoachAvatar = coach.avatar
 
-  useEffect(() => {
-    async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
-      setName(displayNameFromEmail(user.email))
-
-      const since = new Date()
-      since.setDate(since.getDate() - 30)
-
-      const [{ data: profileData }, { data: mealsData }, { data: messagesData }, { data: recData }] = await Promise.all([
-        supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
-        supabase
-          .from('meals')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('eaten_at', since.toISOString())
-          .order('eaten_at', { ascending: false })
-          .returns<Meal[]>(),
-        supabase
-          .from('coach_messages')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('sender', 'kai')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .returns<CoachMessage[]>(),
-        supabase
-          .from('recommendations')
-          .select('*')
-          .eq('client_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .returns<Recommendation[]>(),
-      ])
-
-      setProfile(profileData ?? null)
-      const today = new Date()
-      const all = mealsData ?? []
-      setTodayMeals(all.filter((m) => isSameDay(new Date(m.eaten_at), today)))
-      setRecentMeals(all)
-      setLastMessage(messagesData?.[0] ?? null)
-      setLatestRec(recData?.[0] ?? null)
+  const load = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
       setLoading(false)
+      return
     }
+    setName(displayNameFromEmail(user.email))
+
+    const since = new Date()
+    since.setDate(since.getDate() - 30)
+
+    const [{ data: profileData }, { data: mealsData }, { data: messagesData }, { data: recData }] = await Promise.all([
+      supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
+      supabase
+        .from('meals')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('eaten_at', since.toISOString())
+        .order('eaten_at', { ascending: false })
+        .returns<Meal[]>(),
+      supabase
+        .from('coach_messages')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('sender', 'kai')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .returns<CoachMessage[]>(),
+      supabase
+        .from('recommendations')
+        .select('*')
+        .eq('client_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .returns<Recommendation[]>(),
+    ])
+
+    setProfile(profileData ?? null)
+    const today = new Date()
+    const all = mealsData ?? []
+    setTodayMeals(all.filter((m) => isSameDay(new Date(m.eaten_at), today)))
+    setRecentMeals(all)
+    setLastMessage(messagesData?.[0] ?? null)
+    setLatestRec(recData?.[0] ?? null)
+    setLoading(false)
+  }, [supabase])
+
+  useEffect(() => {
     load()
     const interval = setInterval(load, 30000)
     return () => clearInterval(interval)
-  }, [supabase])
+  }, [load])
+
+  useEffect(() => {
+    function onFocus() {
+      load()
+      router.refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [load, router])
 
   const totalCalories = todayMeals.reduce((s, m) => s + m.calories, 0)
   const goalCalories = profile?.daily_calories_goal ?? 2000
@@ -159,7 +163,7 @@ export default function HomePage() {
       >
         <p className="text-sm text-[#ffffff]/80">{greetingPrefix()}</p>
         <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-[#ffffff]">{name || 'bem-vindo(a)'}</h1>
-        <p className="mt-3 max-w-xs text-sm text-[#ffffff]/80">{motivationalPhrase}</p>
+        <p className="mt-3 max-w-xs text-xs italic text-[#ffffff]/70">{motivationalPhrase}</p>
       </div>
 
       <div className="px-4">

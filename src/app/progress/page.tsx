@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Bar,
   BarChart,
@@ -27,6 +28,7 @@ import ThemeToggle from '@/components/ThemeToggle'
 import type { Bioimpedance, HealthLog, Meal, UserProfile } from '@/types'
 
 export default function ProgressPage() {
+  const router = useRouter()
   const supabase = createClient()
 
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -35,54 +37,64 @@ export default function ProgressPage() {
   const [healthLogs, setHealthLogs] = useState<HealthLog[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
-
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - 30)
-      const cutoffDate = cutoff.toISOString().slice(0, 10)
-
-      const [{ data: profileData }, { data: mealsData }, { data: bioData }, { data: healthData }] = await Promise.all([
-        supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
-        supabase
-          .from('meals')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('eaten_at', cutoff.toISOString())
-          .order('eaten_at', { ascending: true })
-          .returns<Meal[]>(),
-        supabase
-          .from('bioimpedance')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('date', { ascending: true })
-          .returns<Bioimpedance[]>(),
-        supabase
-          .from('health_logs')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('date', cutoffDate)
-          .order('date', { ascending: true })
-          .returns<HealthLog[]>(),
-      ])
-
-      setProfile(profileData ?? null)
-      setMeals(mealsData ?? [])
-      setBioRecords(bioData ?? [])
-      setHealthLogs(healthData ?? [])
+  const load = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
       setLoading(false)
+      return
     }
+
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffDate = cutoff.toISOString().slice(0, 10)
+
+    const [{ data: profileData }, { data: mealsData }, { data: bioData }, { data: healthData }] = await Promise.all([
+      supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
+      supabase
+        .from('meals')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('eaten_at', cutoff.toISOString())
+        .order('eaten_at', { ascending: true })
+        .returns<Meal[]>(),
+      supabase
+        .from('bioimpedance')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('date', { ascending: true })
+        .returns<Bioimpedance[]>(),
+      supabase
+        .from('health_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('date', cutoffDate)
+        .order('date', { ascending: true })
+        .returns<HealthLog[]>(),
+    ])
+
+    setProfile(profileData ?? null)
+    setMeals(mealsData ?? [])
+    setBioRecords(bioData ?? [])
+    setHealthLogs(healthData ?? [])
+    setLoading(false)
+  }, [supabase])
+
+  useEffect(() => {
     load()
     const interval = setInterval(load, 30000)
     return () => clearInterval(interval)
-  }, [supabase])
+  }, [load])
+
+  useEffect(() => {
+    function onFocus() {
+      load()
+      router.refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [load, router])
 
   const calorieSeries = caloriesByDay(meals, 30)
   const bioSeries = bioimpedanceSeries(bioRecords)

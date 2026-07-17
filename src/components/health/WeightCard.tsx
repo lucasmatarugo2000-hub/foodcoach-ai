@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Scale } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
+import SaveButton from './SaveButton'
 import type { HealthLog } from '@/types'
 
 interface WeightCardProps {
@@ -13,11 +14,19 @@ interface WeightCardProps {
 
 export default function WeightCard({ log, previousWeight, onSave }: WeightCardProps) {
   const [weight, setWeight] = useState(log?.weight?.toString() ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   async function commit() {
     const n = Number(weight)
     if (!weight || Number.isNaN(n)) return
-    await onSave({ weight: n })
+    setSaving(true)
+    const ok = await onSave({ weight: n })
+    setSaving(false)
+    if (ok) {
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    }
   }
 
   const delta = log?.weight != null && previousWeight != null ? Math.round((log.weight - previousWeight) * 10) / 10 : null
@@ -30,7 +39,6 @@ export default function WeightCard({ log, previousWeight, onSave }: WeightCardPr
         step="0.1"
         value={weight}
         onChange={(e) => setWeight(e.target.value)}
-        onBlur={commit}
         placeholder="kg"
         className="w-full rounded-lg px-2 py-2 text-sm"
       />
@@ -39,6 +47,7 @@ export default function WeightCard({ log, previousWeight, onSave }: WeightCardPr
           {delta > 0 ? '↑' : delta < 0 ? '↓' : '='} {Math.abs(delta)}kg vs último registro
         </p>
       )}
+      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }
