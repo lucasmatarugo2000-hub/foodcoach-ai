@@ -48,6 +48,8 @@ export interface DietPlan {
   meals_json: DietMealsJson
   created_at: string
   is_active: boolean
+  label: string | null
+  started_at: string | null
 }
 
 export interface DietComparison {

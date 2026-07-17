@@ -12,6 +12,12 @@ export const runtime = 'nodejs'
 interface ReadDietRequest {
   image: string
   mediaType?: string
+  label?: string
+}
+
+function defaultDietLabel(): string {
+  const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return `Dieta ${today}`
 }
 
 const BILLING_ERROR_MESSAGE = 'Serviço de leitura de dieta temporariamente indisponível. Entre em contato com o suporte.'
@@ -179,11 +185,14 @@ export async function POST(request: Request) {
 
     await supabase.from('diet_plans').update({ is_active: false }).eq('user_id', user.id).eq('is_active', true)
 
+    const label = body.label?.trim() || defaultDietLabel()
     const { error: insertError } = await supabase.from('diet_plans').insert({
       user_id: user.id,
       raw_text: null,
       meals_json: result,
       is_active: true,
+      label,
+      started_at: new Date().toISOString().slice(0, 10),
     })
 
     if (insertError) {
