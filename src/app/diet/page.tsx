@@ -142,6 +142,10 @@ export default function DietPage() {
     <div className="min-h-screen px-4 pb-28 pt-6">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
       <h1 className="mb-1 text-xl font-bold">Sua dieta</h1>
+      <p className="mb-3 text-sm text-white/70">
+        Sua dieta prescrita é usada pelo Kai para comparar suas refeições, sugerir substituições e acompanhar sua
+        aderência ao plano alimentar.
+      </p>
       <p className="mb-5 text-xs text-white/50">
         Sua dieta é usada como referência. O app não substitui acompanhamento profissional.
       </p>
@@ -195,22 +199,22 @@ export default function DietPage() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {meal.foods.map((food, fIdx) => (
-                    <div key={fIdx} className="flex items-center gap-2 text-sm">
+                    <div key={fIdx} className="flex items-center gap-1.5">
                       <input
                         value={food.name}
                         onChange={(e) => updateFoodField(mIdx, fIdx, 'name', e.target.value)}
-                        className="flex-1 rounded-lg px-2 py-1.5 text-sm"
+                        className="min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-sm"
                       />
                       <input
                         value={food.quantity}
                         onChange={(e) => updateFoodField(mIdx, fIdx, 'quantity', e.target.value)}
-                        className="w-20 rounded-lg px-2 py-1.5 text-sm"
+                        className="w-20 shrink-0 rounded-lg px-1.5 py-1.5 text-xs"
                       />
                       <input
                         type="number"
                         value={food.calories}
                         onChange={(e) => updateFoodField(mIdx, fIdx, 'calories', e.target.value)}
-                        className="w-16 rounded-lg px-2 py-1.5 text-sm"
+                        className="w-[60px] shrink-0 rounded-lg bg-primary/15 px-1 py-1.5 text-center text-xs font-semibold text-primary"
                       />
                     </div>
                   ))}
