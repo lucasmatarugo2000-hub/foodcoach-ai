@@ -97,7 +97,7 @@ async function readDietFromPdfText(pdfText: string): Promise<string> {
   const anthropic = getAnthropicClient()
   const response = await anthropic.messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 2000,
+    max_tokens: 4000,
     messages: [
       {
         role: 'user',
@@ -111,6 +111,10 @@ ${pdfText}`,
 
   const textBlock = response.content.find((b) => b.type === 'text')
   const raw = textBlock && textBlock.type === 'text' ? textBlock.text : ''
+  console.log('RESPOSTA BRUTA DO CLAUDE:', raw)
+  if (response.stop_reason === 'max_tokens') {
+    console.error('read-diet: Claude response was truncated by max_tokens')
+  }
   if (!raw) throw new Error('empty_anthropic_response')
   return raw
 }
