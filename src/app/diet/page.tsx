@@ -100,17 +100,24 @@ export default function DietPage() {
   }
 
   return (
-    <div className="min-h-screen px-4 pb-28 pt-6">
+    <div className="min-h-screen px-4 pb-28 pt-16">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
 
-      <div className="mb-1 flex items-center justify-between gap-3">
+      <div className="mb-1 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-bold">Minhas Dietas</h1>
         <button
           onClick={() => setShowNewDietModal(true)}
           disabled={uploading}
           className="shrink-0 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
         >
-          {uploading ? 'Lendo dieta...' : '+ Nova Dieta'}
+          {uploading ? (
+            'Lendo dieta...'
+          ) : (
+            <>
+              <span className="sm:hidden">+ Nova</span>
+              <span className="hidden sm:inline">+ Nova Dieta</span>
+            </>
+          )}
         </button>
       </div>
       <p className="mb-3 text-sm text-white/70">
