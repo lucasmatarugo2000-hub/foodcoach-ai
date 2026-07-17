@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
-import { PDFParse } from 'pdf-parse'
+import { extractText } from 'unpdf'
 import { getOpenAIClient, extractJson } from '@/lib/openai'
 import { getAnthropicClient, CLAUDE_MODEL } from '@/lib/anthropic'
 import { createClient } from '@/lib/supabase/server'
@@ -59,10 +59,10 @@ async function readDietFromImage(dataUrl: string): Promise<string> {
 }
 
 /**
- * PDF path: extract raw text with pdf-parse (no canvas/ghostscript needed at
- * runtime — works reliably on Vercel's serverless functions) and hand the
- * text to Claude to structure. First page/whatever text is embedded is
- * usually enough — prescribed diets are short documents.
+ * PDF path: extract raw text with unpdf — a pdf.js build made for
+ * edge/serverless runtimes (no DOM, no canvas, no native deps — unlike
+ * pdf-parse, which reaches for `DOMMatrix` and crashes on Vercel) — and hand
+ * the text to Claude to structure.
  */
 async function readDietFromPdfText(pdfText: string): Promise<string> {
   const anthropic = getAnthropicClient()
@@ -118,15 +118,12 @@ export async function POST(request: Request) {
       const buffer = Buffer.from(base64Payload(dataUrl), 'base64')
 
       let pdfText = ''
-      const parser = new PDFParse({ data: buffer })
       try {
-        const result = await parser.getText()
+        const result = await extractText(new Uint8Array(buffer), { mergePages: true })
         pdfText = result.text?.trim() ?? ''
       } catch (pdfErr) {
         console.error('read-diet: failed to parse PDF —', pdfErr)
         return NextResponse.json({ error: UNREADABLE_PDF_MESSAGE }, { status: 422 })
-      } finally {
-        await parser.destroy()
       }
 
       if (!pdfText) {
