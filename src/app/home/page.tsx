@@ -20,7 +20,7 @@ import { createClient } from '@/lib/supabase/client'
 import { isSameDay, mealTypeLabel, statusBadge, formatTime, greetingPrefix, displayNameFromEmail } from '@/lib/format'
 import { caloriesByWeekday, deriveMacroTargets, computeStreak } from '@/lib/charts'
 import { CHART_COLORS, darkChartTooltipStyle } from '@/lib/chartTheme'
-import KaiAvatar from '@/components/KaiAvatar'
+import { getCoachInfo } from '@/lib/coach'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
 import RecommendationCard from '@/components/RecommendationCard'
@@ -45,6 +45,8 @@ export default function HomePage() {
   const [lastMessage, setLastMessage] = useState<CoachMessage | null>(null)
   const [latestRec, setLatestRec] = useState<Recommendation | null>(null)
   const [loading, setLoading] = useState(true)
+  const coach = getCoachInfo(profile?.gender ?? null)
+  const CoachAvatar = coach.avatar
 
   useEffect(() => {
     async function load() {
@@ -96,6 +98,8 @@ export default function HomePage() {
       setLoading(false)
     }
     load()
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
   }, [supabase])
 
   const totalCalories = todayMeals.reduce((s, m) => s + m.calories, 0)
@@ -237,7 +241,7 @@ export default function HomePage() {
           <ShortcutCard href="/meal/new" Icon={UtensilsCrossed} label="Registrar refeição" from="#00d4aa" to="#00695c" />
           <ShortcutCard href="/progress" Icon={TrendingUp} label="Minha evolução" from="#7c3aed" to="#4c1d95" />
           <ShortcutCard href="/bioimpedance" Icon={Scale} label="Bioimpedância" from="#3b82f6" to="#1d4ed8" />
-          <ShortcutCard href="/coach" Icon={MessageCircle} label="Falar com Kai" from="#f59e0b" to="#b45309" />
+          <ShortcutCard href="/coach" Icon={MessageCircle} label={`Falar com ${coach.name}`} from="#f59e0b" to="#b45309" />
         </div>
 
         {/* Weekly calories bar chart */}
@@ -286,13 +290,13 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Kai message */}
+        {/* Coach message */}
         {lastMessage && (
           <Link href="/coach" className="mt-8 block">
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-md shadow-black/10">
-              <KaiAvatar state="idle" size={60} />
+              <CoachAvatar state="idle" size={60} />
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-primary">Kai</div>
+                <div className="text-xs font-semibold text-primary">{coach.name}</div>
                 <p className="line-clamp-2 text-sm text-white/70">{lastMessage.message}</p>
               </div>
             </div>

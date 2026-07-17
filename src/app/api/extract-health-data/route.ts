@@ -4,7 +4,7 @@ import { getAnthropicClient, CLAUDE_MODEL } from '@/lib/anthropic'
 import { extractJson } from '@/lib/openai'
 import { createClient } from '@/lib/supabase/server'
 import { formatSleepHours, formatWaterMl, workoutTypeLabel } from '@/lib/health'
-import type { ExtractedHealthData, HealthLog } from '@/types'
+import type { ExtractedHealthData, HealthLog, MenstrualCycle } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -13,7 +13,7 @@ interface ExtractHealthDataRequest {
 }
 
 const EXTRACTION_SYSTEM_PROMPT = `Você extrai dados de saúde de mensagens em português do Brasil. Analise a mensagem do usuário e extraia QUALQUER dado de saúde mencionado. Retorne APENAS JSON válido sem markdown, no formato exato:
-{ "sleep_start": string|null, "sleep_end": string|null, "sleep_hours": number|null, "sleep_quality": number|null, "water_ml": number|null, "weight": number|null, "mood": number|null, "energy": number|null, "workout_type": string|null, "workout_duration": number|null, "workout_calories": number|null, "steps": number|null, "symptoms": string[]|null }
+{ "sleep_start": string|null, "sleep_end": string|null, "sleep_hours": number|null, "sleep_quality": number|null, "water_ml": number|null, "weight": number|null, "mood": number|null, "energy": number|null, "workout_type": string|null, "workout_duration": number|null, "workout_calories": number|null, "steps": number|null, "symptoms": string[]|null, "period_started": boolean|null }
 
 Regras:
 - Campos não mencionados na mensagem devem ser null.
@@ -24,6 +24,7 @@ Regras:
 - Litros de água: converta para ml (1,5 litro = 1500). "um copo" ≈ 250ml.
 - workout_type deve ser um destes: cardio, musculacao, yoga, caminhada, outro.
 - mood e energy vão de 1 a 5 quando mencionados explicitamente ou de forma clara ("me sinto péssimo" ≈ 1-2, "ótimo, cheio de energia" ≈ 4-5).
+- period_started deve ser true apenas se a usuária disser claramente que o período/menstruação começou hoje ou está no primeiro dia do ciclo (ex: "estou no primeiro dia do meu ciclo", "comecei a menstruar hoje", "minha menstruação desceu hoje"). Caso contrário, null.
 - Se a mensagem não contém NENHUM dado de saúde identificável, retorne todos os campos como null.`
 
 function hasAnyExtractedValue(data: ExtractedHealthData): boolean {
@@ -58,6 +59,7 @@ function buildConfirmationMessage(data: ExtractedHealthData): string {
     parts.push(`Treino: ${workoutTypeLabel(data.workout_type)}${data.workout_duration ? ` ${data.workout_duration}min` : ''}`)
   }
   if (data.symptoms !== null && data.symptoms.length > 0) parts.push(`Sintomas: ${data.symptoms.join(', ')}`)
+  if (data.period_started) parts.push('Início do período registrado')
   return `Registrei: ${parts.join(' • ')}`
 }
 
@@ -103,54 +105,88 @@ export async function POST(request: Request) {
       return NextResponse.json({ extracted: false })
     }
 
-    if (!hasAnyExtractedValue(data)) {
+    const hasLogData = hasAnyExtractedValue(data)
+    const hasPeriodStart = data.period_started === true
+
+    if (!hasLogData && !hasPeriodStart) {
       return NextResponse.json({ extracted: false })
     }
 
     const today = new Date().toISOString().slice(0, 10)
+    let saved: HealthLog | undefined
 
-    // Water is additive across chat messages ("I just drank a glass") — every
-    // other field is a plain override when the model actually extracted it.
-    const { data: existing } = await supabase
-      .from('health_logs')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('date', today)
-      .maybeSingle<HealthLog>()
+    if (hasLogData) {
+      // Water is additive across chat messages ("I just drank a glass") — every
+      // other field is a plain override when the model actually extracted it.
+      const { data: existing } = await supabase
+        .from('health_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .maybeSingle<HealthLog>()
 
-    const payload: Record<string, unknown> = {
-      user_id: user.id,
-      date: today,
-      data_source: 'chat',
+      const payload: Record<string, unknown> = {
+        user_id: user.id,
+        date: today,
+        data_source: 'chat',
+      }
+
+      if (data.sleep_start !== null) payload.sleep_start = data.sleep_start
+      if (data.sleep_end !== null) payload.sleep_end = data.sleep_end
+      if (data.sleep_hours !== null) payload.sleep_hours = data.sleep_hours
+      if (data.sleep_quality !== null) payload.sleep_quality = data.sleep_quality
+      if (data.weight !== null) payload.weight = data.weight
+      if (data.mood !== null) payload.mood = data.mood
+      if (data.energy !== null) payload.energy = data.energy
+      if (data.workout_type !== null) payload.workout_type = data.workout_type
+      if (data.workout_duration !== null) payload.workout_duration = data.workout_duration
+      if (data.workout_calories !== null) payload.workout_calories = data.workout_calories
+      if (data.steps !== null) payload.steps = data.steps
+      if (data.symptoms !== null && data.symptoms.length > 0) {
+        const merged = new Set([...(existing?.symptoms ?? []), ...data.symptoms])
+        payload.symptoms = Array.from(merged)
+      }
+      if (data.water_ml !== null) {
+        payload.water_ml = (existing?.water_ml ?? 0) + data.water_ml
+      }
+
+      console.log('Salvando health_log:', payload)
+
+      const { data: savedLog, error: upsertError } = await supabase
+        .from('health_logs')
+        .upsert(payload, { onConflict: 'user_id,date' })
+        .select()
+        .single<HealthLog>()
+
+      if (upsertError || !savedLog) {
+        console.error('extract-health-data: health_logs upsert error', upsertError)
+      } else {
+        saved = savedLog
+      }
     }
 
-    if (data.sleep_start !== null) payload.sleep_start = data.sleep_start
-    if (data.sleep_end !== null) payload.sleep_end = data.sleep_end
-    if (data.sleep_hours !== null) payload.sleep_hours = data.sleep_hours
-    if (data.sleep_quality !== null) payload.sleep_quality = data.sleep_quality
-    if (data.weight !== null) payload.weight = data.weight
-    if (data.mood !== null) payload.mood = data.mood
-    if (data.energy !== null) payload.energy = data.energy
-    if (data.workout_type !== null) payload.workout_type = data.workout_type
-    if (data.workout_duration !== null) payload.workout_duration = data.workout_duration
-    if (data.workout_calories !== null) payload.workout_calories = data.workout_calories
-    if (data.steps !== null) payload.steps = data.steps
-    if (data.symptoms !== null && data.symptoms.length > 0) {
-      const merged = new Set([...(existing?.symptoms ?? []), ...data.symptoms])
-      payload.symptoms = Array.from(merged)
-    }
-    if (data.water_ml !== null) {
-      payload.water_ml = (existing?.water_ml ?? 0) + data.water_ml
+    if (hasPeriodStart) {
+      const cyclePayload = {
+        user_id: user.id,
+        cycle_start: today,
+        cycle_length: 28,
+        period_length: 5,
+        symptoms: data.symptoms,
+      }
+      console.log('Salvando menstrual_cycle:', cyclePayload)
+
+      const { error: cycleError } = await supabase
+        .from('menstrual_cycles')
+        .insert(cyclePayload)
+        .select()
+        .single<MenstrualCycle>()
+
+      if (cycleError) {
+        console.error('extract-health-data: menstrual_cycles insert error', cycleError)
+      }
     }
 
-    const { data: saved, error: upsertError } = await supabase
-      .from('health_logs')
-      .upsert(payload, { onConflict: 'user_id,date' })
-      .select()
-      .single<HealthLog>()
-
-    if (upsertError || !saved) {
-      console.error('extract-health-data: upsert error', upsertError)
+    if (!saved && !hasPeriodStart) {
       return NextResponse.json({ extracted: false })
     }
 

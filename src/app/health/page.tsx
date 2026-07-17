@@ -13,7 +13,8 @@ import MoodEnergyCard from '@/components/health/MoodEnergyCard'
 import WorkoutCard from '@/components/health/WorkoutCard'
 import StepsCard from '@/components/health/StepsCard'
 import SymptomsCard from '@/components/health/SymptomsCard'
-import type { HealthLog, UserProfile } from '@/types'
+import CycleCard, { type NewCycleFields } from '@/components/health/CycleCard'
+import type { HealthLog, MenstrualCycle, UserProfile } from '@/types'
 
 function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -31,10 +32,11 @@ export default function HealthPage() {
   const [log, setLog] = useState<HealthLog | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [previousWeight, setPreviousWeight] = useState<number | null>(null)
+  const [latestCycle, setLatestCycle] = useState<MenstrualCycle | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -62,11 +64,27 @@ export default function HealthPage() {
     setLog(logData ?? null)
     setProfile(profileData ?? null)
     setPreviousWeight(prevWeightData?.weight ?? null)
+
+    if (profileData?.gender === 'female') {
+      const { data: cycleData } = await supabase
+        .from('menstrual_cycles')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('cycle_start', { ascending: false })
+        .limit(1)
+        .maybeSingle<MenstrualCycle>()
+      setLatestCycle(cycleData ?? null)
+    } else {
+      setLatestCycle(null)
+    }
+
     setLoading(false)
   }, [supabase, selectedDate])
 
   useEffect(() => {
     load()
+    const interval = setInterval(() => load(true), 30000)
+    return () => clearInterval(interval)
   }, [load])
 
   function changeDay(delta: number) {
@@ -90,6 +108,21 @@ export default function HealthPage() {
       return true
     }
     console.error('health_logs upsert error', error)
+    return false
+  }
+
+  async function registerCycle(fields: NewCycleFields): Promise<boolean | undefined> {
+    if (!userId) return
+    const { data, error } = await supabase
+      .from('menstrual_cycles')
+      .insert({ user_id: userId, ...fields })
+      .select()
+      .single<MenstrualCycle>()
+    if (!error && data) {
+      setLatestCycle(data)
+      return true
+    }
+    console.error('menstrual_cycles insert error', error)
     return false
   }
 
@@ -133,6 +166,7 @@ export default function HealthPage() {
           <WorkoutCard log={log} onSave={upsertField} />
           <StepsCard log={log} onSave={upsertField} />
           <SymptomsCard log={log} onSave={upsertField} />
+          {profile?.gender === 'female' && <CycleCard cycle={latestCycle} onRegister={registerCycle} />}
         </div>
       )}
 

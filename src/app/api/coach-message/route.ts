@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClient, CLAUDE_MODEL } from '@/lib/anthropic'
 import { createClient } from '@/lib/supabase/server'
-import type { DietMealsJson, HealthLog, Meal, UserProfile } from '@/types'
+import { buildCycleContextPrompt, getCoachPersonaPrompt } from '@/lib/coach'
+import { computeCycleStatus } from '@/lib/cycle'
+import type { DietMealsJson, HealthLog, Meal, MenstrualCycle, UserProfile } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -57,7 +59,7 @@ const HEALTH_CORRELATION_PROMPT = `Você tem acesso aos registros de saúde do u
 - Se o peso subiu após um fim de semana, contextualize com os dados de alimentação
 - Celebre conquistas: 7 dias seguidos acima de 8.000 passos, meta de água atingida, etc.`
 
-const TACO_PROMPT_SECTION = `Você é Kai, um coach de alimentação brasileiro. Para todas as informações nutricionais, use como referência principal a TACO — Tabela Brasileira de Composição de Alimentos (UNICAMP, 4ª edição).
+const TACO_PROMPT_SECTION = `Para todas as informações nutricionais, use como referência principal a TACO — Tabela Brasileira de Composição de Alimentos (UNICAMP, 4ª edição).
 
 Quando mencionar calorias, macronutrientes ou composição de alimentos, baseie-se nos valores da TACO. Priorize sempre alimentos típicos da dieta brasileira e seus valores reais conforme a tabela TACO.
 
@@ -75,10 +77,15 @@ Exemplos de referência TACO que você deve conhecer:
 
 Quando sugerir substituições, prefira sempre opções presentes na TACO com perfil nutricional similar. Mencione explicitamente que seus valores são baseados na TACO quando relevante.`
 
-function buildSystemPrompt(profile: UserProfile, dietSummary: string, healthSummary: string) {
+function buildSystemPrompt(
+  profile: UserProfile,
+  dietSummary: string,
+  healthSummary: string,
+  cycleContext: string | null
+) {
   return `${TACO_PROMPT_SECTION}
 
-Sua abordagem é terapêutica e acolhedora. Fale sempre em primeira pessoa como Kai. Seu tom é curioso, encorajador, nunca julgador. Nunca use: 'errado', 'proibido', 'excesso', 'traiu a dieta', 'pecado'.
+${getCoachPersonaPrompt(profile.gender)}
 
 Quando o usuário tem dieta ativa, use-a como referência neutra, nunca como régua de julgamento. Se divergir da dieta, mencione de forma neutra e ofereça substituição apenas se perguntado ou se a divergência for grande.
 
@@ -88,7 +95,7 @@ ${HEALTH_CORRELATION_PROMPT}
 
 Registros de saúde dos últimos 7 dias (mais recente por último):
 ${healthSummary}
-
+${cycleContext ? `\n${cycleContext}\n` : ''}
 Objetivo: ${profile.goal ? (GOAL_LABELS[profile.goal] ?? profile.goal) : 'não definido'}. Meta calórica: ${profile.daily_calories_goal ?? 'não definida'} kcal. Dieta ativa: ${dietSummary}. Estilo: ${profile.coaching_style === 'direct' ? 'direto' : 'acolhedor'}.`
 }
 
@@ -150,9 +157,24 @@ export async function POST(request: Request) {
     .order('date', { ascending: true })
     .returns<HealthLog[]>()
 
+  let cycleContext: string | null = null
+  if (profile.gender === 'female') {
+    const { data: latestCycle } = await supabase
+      .from('menstrual_cycles')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('cycle_start', { ascending: false })
+      .limit(1)
+      .maybeSingle<MenstrualCycle>()
+    if (latestCycle) {
+      const status = computeCycleStatus(latestCycle)
+      cycleContext = buildCycleContextPrompt(status.phase, status.cycleDay, status.cycleLength)
+    }
+  }
+
   const dietSummary = buildDietSummary(activeDiet?.meals_json ?? null)
   const healthSummary = buildHealthSummary(healthLogs ?? [])
-  const systemPrompt = buildSystemPrompt(profile, dietSummary, healthSummary)
+  const systemPrompt = buildSystemPrompt(profile, dietSummary, healthSummary, cycleContext)
 
   const history = (recentMessages ?? [])
     .slice()
@@ -180,7 +202,7 @@ export async function POST(request: Request) {
     const anthropic = getAnthropicClient()
     const response = await anthropic.messages.create({
       model: CLAUDE_MODEL,
-      max_tokens: 600,
+      max_tokens: 2000,
       system: systemPrompt,
       messages: [...history, { role: 'user', content: turnText }],
     })

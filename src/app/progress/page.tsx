@@ -80,6 +80,8 @@ export default function ProgressPage() {
       setLoading(false)
     }
     load()
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
   }, [supabase])
 
   const calorieSeries = caloriesByDay(meals, 30)

@@ -1,16 +1,25 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { currentMealType } from '@/lib/dietComparison'
 import { greetingPrefix, displayNameFromEmail } from '@/lib/format'
-import KaiAvatar from '@/components/KaiAvatar'
+import { getCoachInfo } from '@/lib/coach'
 import ChatBubble from '@/components/ChatBubble'
 import SubstitutionCard from '@/components/SubstitutionCard'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
-import type { CoachMessage, CoachSender, DietMealsJson, ExtractHealthDataResult, KaiState, Substitution } from '@/types'
+import type {
+  CoachMessage,
+  CoachSender,
+  DietMealsJson,
+  ExtractHealthDataResult,
+  Gender,
+  KaiState,
+  Substitution,
+} from '@/types'
 
 type ChatItem =
   | { kind: 'message'; id: string; sender: CoachSender; message: string; createdAt: string }
@@ -23,6 +32,7 @@ function isSubstitutionRequest(text: string): boolean {
 }
 
 export default function CoachPage() {
+  const router = useRouter()
   const supabase = createClient()
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
@@ -31,7 +41,10 @@ export default function CoachPage() {
   const [sending, setSending] = useState(false)
   const [dietPlan, setDietPlan] = useState<DietMealsJson | null>(null)
   const [name, setName] = useState('')
+  const [gender, setGender] = useState<Gender | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const coach = getCoachInfo(gender)
+  const CoachAvatar = coach.avatar
 
   useEffect(() => {
     async function load() {
@@ -44,7 +57,7 @@ export default function CoachPage() {
       }
       setName(displayNameFromEmail(user.email))
 
-      const [{ data: messages }, { data: diet }] = await Promise.all([
+      const [{ data: messages }, { data: diet }, { data: profile }] = await Promise.all([
         supabase
           .from('coach_messages')
           .select('*')
@@ -57,6 +70,7 @@ export default function CoachPage() {
           .eq('user_id', user.id)
           .eq('is_active', true)
           .maybeSingle<{ meals_json: DietMealsJson }>(),
+        supabase.from('users_profile').select('gender').eq('id', user.id).maybeSingle<{ gender: Gender | null }>(),
       ])
 
       setItems(
@@ -69,6 +83,7 @@ export default function CoachPage() {
         }))
       )
       setDietPlan(diet?.meals_json ?? null)
+      setGender(profile?.gender ?? null)
       setLoading(false)
     }
     load()
@@ -175,6 +190,7 @@ export default function CoachPage() {
           },
         ])
         talkThenIdle()
+        router.refresh()
       }
 
       const extraction = await extractionPromise
@@ -183,6 +199,7 @@ export default function CoachPage() {
           ...prev,
           { kind: 'health_confirmation', id: `health-${Date.now()}`, message: extraction.message as string },
         ])
+        router.refresh()
       }
     } catch (err) {
       console.error('coach chat error', err)
@@ -216,7 +233,7 @@ export default function CoachPage() {
           <div className="absolute inset-0 animate-spin-slow rounded-full gradient-ring" />
           <div className="absolute inset-[3px] rounded-full bg-card" />
           <div className="absolute inset-0 flex items-center justify-center">
-            <KaiAvatar state={kaiState} size={138} />
+            <CoachAvatar state={kaiState} size={138} />
           </div>
         </div>
         <h2 className="mt-4 text-lg font-extrabold tracking-tight text-[#ffffff]">
@@ -231,7 +248,7 @@ export default function CoachPage() {
           <p className="text-center text-sm text-white/40">Carregando conversa...</p>
         ) : items.length === 0 ? (
           <p className="text-center text-sm text-white/40">
-            Diga oi para o Kai e comece a conversar sobre sua alimentação.
+            Diga oi para {coach.name === 'Luna' ? 'a Luna' : 'o Kai'} e comece a conversar sobre sua alimentação.
           </p>
         ) : (
           items.map((item) =>
@@ -261,7 +278,7 @@ export default function CoachPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Fale com o Kai..."
+            placeholder={`Fale com ${coach.name === 'Luna' ? 'a' : 'o'} ${coach.name}...`}
             className="flex-1 rounded-xl px-4 py-3 outline-none focus:border-primary"
           />
           <button

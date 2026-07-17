@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation'
 import { Zap, Dumbbell, Scale, Leaf, User, Stethoscope, type LucideIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import KaiAvatar from '@/components/KaiAvatar'
+import LunaAvatar from '@/components/LunaAvatar'
 import ThemeToggle from '@/components/ThemeToggle'
-import type { CoachingStyle, Goal, UserRole } from '@/types'
+import type { CoachingStyle, Gender, Goal, UserRole } from '@/types'
 
 const GOALS: { value: Goal; label: string; Icon: LucideIcon }[] = [
   { value: 'lose_weight', label: 'Emagrecer', Icon: Zap },
@@ -29,6 +30,7 @@ export default function OnboardingPage() {
   const [welcomeState, setWelcomeState] = useState<'talking' | 'idle'>('talking')
   const [wantsDietUpload, setWantsDietUpload] = useState<boolean | null>(null)
 
+  const [gender, setGender] = useState<Gender | null>(null)
   const [role, setRole] = useState<UserRole | null>(null)
   const [nutriNome, setNutriNome] = useState('')
   const [nutriCrn, setNutriCrn] = useState('')
@@ -41,14 +43,16 @@ export default function OnboardingPage() {
   const [coachingStyle, setCoachingStyle] = useState<CoachingStyle | null>(null)
 
   useEffect(() => {
-    if (step === 6) {
+    if (step === 7) {
       setWelcomeState('talking')
       const t = setTimeout(() => setWelcomeState('idle'), 3000)
       return () => clearTimeout(t)
     }
   }, [step])
 
-  const totalSteps = 7
+  const totalSteps = 8
+  const isFemale = gender === 'female'
+  const coachName = isFemale ? 'Luna' : 'Kai'
 
   async function finishClient() {
     setSaving(true)
@@ -65,6 +69,7 @@ export default function OnboardingPage() {
     const { error: upsertError } = await supabase.from('users_profile').upsert({
       id: user.id,
       role: 'client',
+      gender,
       goal,
       current_weight: currentWeight ? Number(currentWeight) : null,
       target_weight: targetWeight ? Number(targetWeight) : null,
@@ -117,6 +122,7 @@ export default function OnboardingPage() {
     const { error: profileError } = await supabase.from('users_profile').upsert({
       id: user.id,
       role: 'nutritionist',
+      gender,
       goal: null,
       coaching_style: 'gentle',
       onboarding_completed: true,
@@ -134,12 +140,13 @@ export default function OnboardingPage() {
   }
 
   function canAdvance() {
-    if (step === 0) return role === 'client'
-    if (step === 1) return goal !== null
-    if (step === 2) return currentWeight !== '' && targetWeight !== ''
-    if (step === 3) return dailyCalories !== ''
-    if (step === 4) return coachingStyle !== null
-    if (step === 5) return wantsDietUpload !== null
+    if (step === 0) return gender !== null
+    if (step === 1) return role === 'client'
+    if (step === 2) return goal !== null
+    if (step === 3) return currentWeight !== '' && targetWeight !== ''
+    if (step === 4) return dailyCalories !== ''
+    if (step === 5) return coachingStyle !== null
+    if (step === 6) return wantsDietUpload !== null
     return true
   }
 
@@ -158,6 +165,41 @@ export default function OnboardingPage() {
 
       <div className="flex-1">
         {step === 0 && (
+          <div>
+            <h2 className="mb-1 text-2xl font-bold">Como você se identifica?</h2>
+            <p className="mb-6 text-sm text-white/60">
+              Isso ajuda a escolher seu coach — Kai ou Luna — e personalizar as recomendações.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setGender('male')}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  gender === 'male' ? 'border-primary bg-primary/10' : 'border-border bg-card'
+                }`}
+              >
+                <div className="text-sm font-semibold">Homem</div>
+              </button>
+              <button
+                onClick={() => setGender('female')}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  gender === 'female' ? 'border-primary bg-primary/10' : 'border-border bg-card'
+                }`}
+              >
+                <div className="text-sm font-semibold">Mulher</div>
+              </button>
+              <button
+                onClick={() => setGender('other')}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  gender === 'other' ? 'border-primary bg-primary/10' : 'border-border bg-card'
+                }`}
+              >
+                <div className="text-sm font-semibold">Prefiro não informar</div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 1 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Você é nutricionista ou cliente?</h2>
             <p className="mb-6 text-sm text-white/60">Vamos personalizar sua experiência no FoodCoach AI.</p>
@@ -226,7 +268,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 1 && (
+        {step === 2 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Qual é o seu objetivo?</h2>
             <p className="mb-6 text-sm text-white/60">Vamos personalizar sua jornada.</p>
@@ -247,10 +289,10 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Peso atual e meta</h2>
-            <p className="mb-6 text-sm text-white/60">Isso ajuda o Kai a acompanhar seu progresso.</p>
+            <p className="mb-6 text-sm text-white/60">Isso ajuda o {coachName} a acompanhar seu progresso.</p>
             <label className="mb-1 block text-sm text-white/70">Peso atual (kg)</label>
             <input
               type="number"
@@ -272,7 +314,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Meta calórica diária</h2>
             <p className="mb-6 text-sm text-white/60">
@@ -290,10 +332,10 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Estilo de coaching</h2>
-            <p className="mb-6 text-sm text-white/60">Como você prefere que o Kai converse com você?</p>
+            <p className="mb-6 text-sm text-white/60">Como você prefere que o {coachName} converse com você?</p>
             <div className="flex flex-col gap-3">
               {STYLES.map((s) => (
                 <button
@@ -311,7 +353,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div>
             <h2 className="mb-1 text-2xl font-bold">Você tem uma dieta prescrita?</h2>
             <p className="mb-6 text-sm text-white/60">
@@ -340,20 +382,25 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {step === 6 && (
+        {step === 7 && (
           <div className="flex flex-col items-center pt-6 text-center">
-            <KaiAvatar state={welcomeState} size={100} />
-            <h2 className="mt-4 text-xl font-bold">Kai</h2>
+            {isFemale ? (
+              <LunaAvatar state={welcomeState} size={100} />
+            ) : (
+              <KaiAvatar state={welcomeState} size={100} />
+            )}
+            <h2 className="mt-4 text-xl font-bold">{coachName}</h2>
             <p className="mx-auto mt-3 max-w-xs text-sm text-white/70">
-              Olá! Sou o Kai, seu coach de alimentação. Estou aqui pra te acompanhar nessa jornada.
-              Vamos começar?
+              {isFemale
+                ? 'Olá! Sou a Luna, sua coach de bem-estar. Estou aqui pra te acompanhar nessa jornada. Vamos começar?'
+                : 'Olá! Sou o Kai, seu coach de alimentação. Estou aqui pra te acompanhar nessa jornada. Vamos começar?'}
             </p>
             {error && <p className="mt-4 text-sm text-danger">{error}</p>}
           </div>
         )}
       </div>
 
-      {!(step === 0 && role === 'nutritionist') && (
+      {!(step === 1 && role === 'nutritionist') && (
         <div className="mt-8 flex gap-3">
           {step > 0 && (
             <button

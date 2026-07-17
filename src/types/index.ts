@@ -1,5 +1,6 @@
 export type Goal = 'lose_weight' | 'gain_muscle' | 'maintenance' | 'reeducation'
 export type CoachingStyle = 'direct' | 'gentle'
+export type Gender = 'male' | 'female' | 'other'
 export type MealType = 'cafe_da_manha' | 'lanche_manha' | 'almoco' | 'lanche_tarde' | 'jantar' | 'ceia'
 export type DietStatus = 'on_track' | 'close' | 'diverged' | 'no_diet'
 export type CoachMessageType = 'comment' | 'question' | 'pattern_insight' | 'substitution' | 'system'
@@ -17,6 +18,8 @@ export interface UserProfile {
   onboarding_completed: boolean
   role: UserRole
   water_goal_ml: number
+  gender: Gender | null
+  birth_date: string | null
   created_at: string
 }
 
@@ -226,10 +229,26 @@ export interface ExtractedHealthData {
   workout_calories: number | null
   steps: number | null
   symptoms: string[] | null
+  period_started: boolean | null
 }
 
 export interface ExtractHealthDataResult {
   extracted: boolean
   data?: HealthLog
   message?: string
+}
+
+// Ciclo menstrual ---------------------------------------------------------
+
+export type CyclePhase = 'menstrual' | 'folicular' | 'ovulatoria' | 'lutea'
+
+export interface MenstrualCycle {
+  id: string
+  user_id: string
+  cycle_start: string
+  cycle_length: number
+  period_length: number
+  symptoms: string[] | null
+  notes: string | null
+  created_at: string
 }
