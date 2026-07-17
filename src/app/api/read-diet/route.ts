@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import OpenAI from 'openai'
 import { getOpenAIClient, extractJson } from '@/lib/openai'
 import { createClient } from '@/lib/supabase/server'
 import type { ReadDietResult } from '@/types'
@@ -9,6 +10,11 @@ interface ReadDietRequest {
   image: string
   mediaType?: string
 }
+
+const BILLING_ERROR_MESSAGE = 'Serviço de leitura de dieta temporariamente indisponível. Entre em contato com o suporte.'
+const NOT_A_DIET_MESSAGE =
+  'Não conseguimos identificar uma dieta neste arquivo. Tente enviar uma foto mais nítida ou um PDF diferente.'
+const GENERIC_ERROR_MESSAGE = 'Não foi possível ler a dieta agora. Tente novamente em instantes.'
 
 export async function POST(request: Request) {
   const supabase = createClient()
@@ -61,13 +67,20 @@ Se calorias não estiverem explícitas, estime. Se não for uma dieta, retorne {
 
     const raw = completion.choices[0]?.message?.content
     if (!raw) {
-      return NextResponse.json({ error: 'Sem resposta do modelo' }, { status: 502 })
+      console.error('read-diet: empty response from OpenAI', completion)
+      return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 502 })
     }
 
-    const result = extractJson<ReadDietResult>(raw)
+    let result: ReadDietResult
+    try {
+      result = extractJson<ReadDietResult>(raw)
+    } catch (parseErr) {
+      console.error('read-diet: failed to parse model output as JSON —', parseErr, '\nraw output:', raw)
+      return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 502 })
+    }
 
     if (result.error === 'not_a_diet') {
-      return NextResponse.json(result, { status: 422 })
+      return NextResponse.json({ error: 'not_a_diet', message: NOT_A_DIET_MESSAGE }, { status: 422 })
     }
 
     await supabase.from('diet_plans').update({ is_active: false }).eq('user_id', user.id).eq('is_active', true)
@@ -80,13 +93,27 @@ Se calorias não estiverem explícitas, estime. Se não for uma dieta, retorne {
     })
 
     if (insertError) {
-      console.error('diet_plans insert error', insertError)
+      console.error('read-diet: diet_plans insert error', insertError)
       return NextResponse.json({ error: 'Falha ao salvar a dieta' }, { status: 500 })
     }
 
     return NextResponse.json(result)
   } catch (err) {
-    console.error('read-diet error', err)
-    return NextResponse.json({ error: 'Falha ao ler a dieta' }, { status: 500 })
+    // Billing/quota issues surface as 429 (RateLimitError, e.g. "insufficient_quota")
+    // or occasionally 403 (PermissionDeniedError) depending on the account restriction.
+    if (err instanceof OpenAI.RateLimitError || err instanceof OpenAI.PermissionDeniedError) {
+      console.error('read-diet: OpenAI billing/quota error —', err.status, err.code, err.message)
+      return NextResponse.json({ error: BILLING_ERROR_MESSAGE }, { status: 500 })
+    }
+    if (err instanceof OpenAI.AuthenticationError) {
+      console.error('read-diet: OpenAI authentication failed — check OPENAI_API_KEY', err.status, err.message)
+      return NextResponse.json({ error: BILLING_ERROR_MESSAGE }, { status: 500 })
+    }
+    if (err instanceof OpenAI.APIError) {
+      console.error('read-diet: OpenAI API error —', err.status, err.code, err.type, err.message)
+      return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 500 })
+    }
+    console.error('read-diet: unexpected error', err)
+    return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 500 })
   }
 }

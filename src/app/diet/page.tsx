@@ -18,6 +18,7 @@ export default function DietPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastFile, setLastFile] = useState<File | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -43,9 +44,7 @@ export default function DietPage() {
     load()
   }, [supabase])
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  function uploadFile(file: File) {
     setError(null)
     setSaved(false)
     const reader = new FileReader()
@@ -59,15 +58,20 @@ export default function DietPage() {
         })
         if (!res.ok) {
           const body = await res.json().catch(() => null)
+          console.error('read-diet request failed', res.status, body)
           if (body?.error === 'not_a_diet') {
-            setError('Não conseguimos identificar uma dieta nesse arquivo. Tente outra imagem.')
+            setError(
+              body?.message ??
+                'Não conseguimos identificar uma dieta neste arquivo. Tente enviar uma foto mais nítida ou um PDF diferente.'
+            )
           } else {
-            setError('Falha ao ler a dieta. Tente novamente.')
+            setError(body?.error ?? 'Não foi possível ler a dieta agora. Tente novamente.')
           }
           return
         }
         const result: DietMealsJson = await res.json()
         setDiet(result)
+        setLastFile(null)
 
         const {
           data: { user },
@@ -83,13 +87,25 @@ export default function DietPage() {
             .maybeSingle<{ id: string }>()
           setDietId(data?.id ?? null)
         }
-      } catch {
-        setError('Falha ao ler a dieta. Tente novamente.')
+      } catch (err) {
+        console.error('read-diet network error', err)
+        setError('Não foi possível ler a dieta agora. Tente novamente.')
       } finally {
         setUploading(false)
       }
     }
     reader.readAsDataURL(file)
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLastFile(file)
+    uploadFile(file)
+  }
+
+  function retry() {
+    if (lastFile) uploadFile(lastFile)
   }
 
   function updateFoodField(
@@ -145,7 +161,20 @@ export default function DietPage() {
         onChange={handleFileChange}
       />
 
-      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      {error && (
+        <div className="mt-3 rounded-xl border border-danger/30 bg-danger/10 p-3">
+          <p className="text-sm text-danger">{error}</p>
+          {lastFile && (
+            <button
+              onClick={retry}
+              disabled={uploading}
+              className="mt-2 rounded-lg border border-danger/40 px-3 py-1.5 text-xs font-semibold text-danger disabled:opacity-50"
+            >
+              {uploading ? 'Tentando novamente...' : 'Tentar novamente'}
+            </button>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <p className="mt-6 text-sm text-white/50">Carregando...</p>
