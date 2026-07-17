@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, UtensilsCrossed, MessageCircle, TrendingUp, User } from 'lucide-react'
+import { Home, UtensilsCrossed, MessageCircle, HeartPulse, TrendingUp, User } from 'lucide-react'
 
 const ITEMS = [
   { href: '/home', label: 'Home', icon: Home },
   { href: '/diet', label: 'Dieta', icon: UtensilsCrossed },
   { href: '/coach', label: 'Coach', icon: MessageCircle },
+  { href: '/health', label: 'Saúde', icon: HeartPulse },
   { href: '/progress', label: 'Evolução', icon: TrendingUp },
   { href: '/profile', label: 'Perfil', icon: User },
 ] as const
@@ -21,18 +22,18 @@ export default function BottomNav() {
         className="h-[2px] w-full"
         style={{ background: 'linear-gradient(90deg, rgb(var(--color-primary)), rgb(var(--color-secondary)))' }}
       />
-      <div className="mx-auto flex max-w-md items-center justify-between px-2 py-2">
+      <div className="mx-auto flex max-w-md items-center justify-between px-1 py-2">
         {ITEMS.map((item) => {
           const active = pathname.startsWith(item.href)
           const Icon = item.icon
           return (
-            <Link key={item.href} href={item.href} className="flex flex-1 items-center justify-center text-[11px]">
+            <Link key={item.href} href={item.href} className="flex flex-1 items-center justify-center text-[10px]">
               <span
-                className={`flex flex-col items-center gap-1 rounded-xl px-3 py-1 transition-colors ${
+                className={`flex flex-col items-center gap-1 rounded-xl px-1.5 py-1 transition-colors ${
                   active ? 'bg-primary/15' : ''
                 }`}
               >
-                <Icon size={22} strokeWidth={2} className={active ? 'text-primary' : 'text-muted'} />
+                <Icon size={20} strokeWidth={2} className={active ? 'text-primary' : 'text-muted'} />
                 <span className={active ? 'text-primary' : 'text-muted'}>{item.label}</span>
               </span>
             </Link>

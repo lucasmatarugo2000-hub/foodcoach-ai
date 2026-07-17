@@ -1,4 +1,4 @@
-import type { Bioimpedance, Meal } from '@/types'
+import type { Bioimpedance, HealthLog, Meal } from '@/types'
 
 function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -105,6 +105,70 @@ export function computeStreak(meals: Meal[], today: Date = new Date()): number {
     cursor.setDate(cursor.getDate() - 1)
   }
   return streak
+}
+
+export interface HealthDailyPoint {
+  date: string
+  label: string
+  sleep_hours: number | null
+  water_ml: number | null
+  weight: number | null
+  weight_trend: number | null
+  steps: number | null
+  mood: number | null
+}
+
+/**
+ * Builds one point per day for the last `days` days (oldest first), reading
+ * from whatever health_logs rows exist — missing days come through with
+ * `null` values so charts can show gaps instead of misleading zeros.
+ */
+export function healthLogsByDay(logs: HealthLog[], days: number, endDate: Date = new Date()): HealthDailyPoint[] {
+  const byDate = new Map<string, HealthLog>()
+  for (const log of logs) byDate.set(log.date, log)
+
+  const points: HealthDailyPoint[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(endDate)
+    d.setDate(d.getDate() - i)
+    const key = dateKey(d)
+    const log = byDate.get(key)
+    points.push({
+      date: key,
+      label: shortDayLabel(d),
+      sleep_hours: log?.sleep_hours ?? null,
+      water_ml: log?.water_ml ?? null,
+      weight: log?.weight ?? null,
+      weight_trend: null,
+      steps: log?.steps ?? null,
+      mood: log?.mood ?? null,
+    })
+  }
+
+  // Simple least-squares linear regression over the (dayIndex, weight) pairs
+  // that actually have a weight logged, then project a trend value for every
+  // day in range so the chart can draw a smooth line alongside the dots.
+  const withWeight = points
+    .map((p, index) => ({ index, weight: p.weight }))
+    .filter((p): p is { index: number; weight: number } => p.weight !== null)
+
+  if (withWeight.length >= 2) {
+    const n = withWeight.length
+    const sumX = withWeight.reduce((s, p) => s + p.index, 0)
+    const sumY = withWeight.reduce((s, p) => s + p.weight, 0)
+    const sumXY = withWeight.reduce((s, p) => s + p.index * p.weight, 0)
+    const sumXX = withWeight.reduce((s, p) => s + p.index * p.index, 0)
+    const denom = n * sumXX - sumX * sumX
+    if (denom !== 0) {
+      const slope = (n * sumXY - sumX * sumY) / denom
+      const intercept = (sumY - slope * sumX) / n
+      points.forEach((p, index) => {
+        p.weight_trend = Math.round((slope * index + intercept) * 10) / 10
+      })
+    }
+  }
+
+  return points
 }
 
 export function bioimpedanceSeries(records: Bioimpedance[]): BioimpedancePoint[] {

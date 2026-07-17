@@ -75,6 +75,7 @@ export default function ProfilePage() {
         current_weight: profile.current_weight,
         target_weight: profile.target_weight,
         daily_calories_goal: profile.daily_calories_goal,
+        water_goal_ml: profile.water_goal_ml,
         coaching_style: profile.coaching_style,
       })
       .eq('id', profile.id)
@@ -151,6 +152,14 @@ export default function ProfilePage() {
         type="number"
         value={profile.daily_calories_goal ?? ''}
         onChange={(e) => setProfile({ ...profile, daily_calories_goal: Number(e.target.value) || null })}
+        className="mb-4 w-full rounded-xl px-4 py-3 outline-none focus:border-primary"
+      />
+
+      <label className="mb-1 block text-xs text-white/60">Meta diária de água (ml)</label>
+      <input
+        type="number"
+        value={profile.water_goal_ml ?? ''}
+        onChange={(e) => setProfile({ ...profile, water_goal_ml: Number(e.target.value) || 0 })}
         className="mb-4 w-full rounded-xl px-4 py-3 outline-none focus:border-primary"
       />
 

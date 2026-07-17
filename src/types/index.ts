@@ -16,6 +16,7 @@ export interface UserProfile {
   coaching_style: CoachingStyle
   onboarding_completed: boolean
   role: UserRole
+  water_goal_ml: number
   created_at: string
 }
 
@@ -183,4 +184,52 @@ export interface ClientSummary {
   last_meal_at: string | null
   adherence_pct: number | null
   linked_at: string
+}
+
+// Health Hub -------------------------------------------------------------
+
+export type DataSource = 'manual' | 'apple_health' | 'google_fit' | 'chat'
+
+export interface HealthLog {
+  id: string
+  user_id: string
+  date: string
+  sleep_start: string | null
+  sleep_end: string | null
+  sleep_hours: number | null
+  sleep_quality: number | null
+  water_ml: number
+  weight: number | null
+  mood: number | null
+  energy: number | null
+  symptoms: string[] | null
+  workout_type: string | null
+  workout_duration: number | null
+  workout_calories: number | null
+  steps: number | null
+  notes: string | null
+  data_source: DataSource
+  created_at: string
+}
+
+export interface ExtractedHealthData {
+  sleep_start: string | null
+  sleep_end: string | null
+  sleep_hours: number | null
+  sleep_quality: number | null
+  water_ml: number | null
+  weight: number | null
+  mood: number | null
+  energy: number | null
+  workout_type: string | null
+  workout_duration: number | null
+  workout_calories: number | null
+  steps: number | null
+  symptoms: string[] | null
+}
+
+export interface ExtractHealthDataResult {
+  extracted: boolean
+  data?: HealthLog
+  message?: string
 }

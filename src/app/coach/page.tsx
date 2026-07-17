@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { currentMealType } from '@/lib/dietComparison'
 import { greetingPrefix, displayNameFromEmail } from '@/lib/format'
@@ -9,11 +10,12 @@ import ChatBubble from '@/components/ChatBubble'
 import SubstitutionCard from '@/components/SubstitutionCard'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
-import type { CoachMessage, CoachSender, DietMealsJson, KaiState, Substitution } from '@/types'
+import type { CoachMessage, CoachSender, DietMealsJson, ExtractHealthDataResult, KaiState, Substitution } from '@/types'
 
 type ChatItem =
   | { kind: 'message'; id: string; sender: CoachSender; message: string; createdAt: string }
   | { kind: 'substitutions'; id: string; items: Substitution[] }
+  | { kind: 'health_confirmation'; id: string; message: string }
 
 function isSubstitutionRequest(text: string): boolean {
   const lower = text.toLowerCase()
@@ -97,6 +99,17 @@ export default function CoachPage() {
     setItems((prev) => [...prev, userItem])
     setKaiState('thinking')
 
+    const extractionPromise = fetch('/api/extract-health-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<ExtractHealthDataResult>) : null))
+      .catch((err) => {
+        console.error('extract-health-data request failed', err)
+        return null
+      })
+
     try {
       if (isSubstitutionRequest(text)) {
         const mealType = currentMealType()
@@ -163,6 +176,14 @@ export default function CoachPage() {
         ])
         talkThenIdle()
       }
+
+      const extraction = await extractionPromise
+      if (extraction?.extracted && extraction.message) {
+        setItems((prev) => [
+          ...prev,
+          { kind: 'health_confirmation', id: `health-${Date.now()}`, message: extraction.message as string },
+        ])
+      }
     } catch (err) {
       console.error('coach chat error', err)
       const isApiError = err instanceof Error && err.message !== 'coach-message request failed'
@@ -216,10 +237,17 @@ export default function CoachPage() {
           items.map((item) =>
             item.kind === 'message' ? (
               <ChatBubble key={item.id} sender={item.sender} message={item.message} timestamp={item.createdAt} />
-            ) : (
+            ) : item.kind === 'substitutions' ? (
               <div key={item.id} className="flex justify-start">
                 <div className="w-[85%]">
                   <SubstitutionCard substitutions={item.items} />
+                </div>
+              </div>
+            ) : (
+              <div key={item.id} className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
+                  <CheckCircle2 size={14} className="shrink-0" />
+                  <span>{item.message}</span>
                 </div>
               </div>
             )

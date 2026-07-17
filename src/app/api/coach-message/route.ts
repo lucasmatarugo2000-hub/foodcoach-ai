@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClient, CLAUDE_MODEL } from '@/lib/anthropic'
 import { createClient } from '@/lib/supabase/server'
-import type { DietMealsJson, Meal, UserProfile } from '@/types'
+import type { DietMealsJson, HealthLog, Meal, UserProfile } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -34,6 +34,29 @@ function buildDietSummary(mealsJson: DietMealsJson | null): string {
   return `Meta diária: ${mealsJson.daily_total_calories} kcal.\n${lines.join('\n')}`
 }
 
+function buildHealthSummary(logs: HealthLog[]): string {
+  if (logs.length === 0) return 'Nenhum registro de saúde nos últimos 7 dias.'
+  const lines = logs.map((l) => {
+    const parts: string[] = []
+    if (l.sleep_hours != null) parts.push(`sono ${l.sleep_hours}h${l.sleep_quality ? ` (qualidade ${l.sleep_quality}/5)` : ''}`)
+    if (l.water_ml) parts.push(`água ${l.water_ml}ml`)
+    if (l.weight != null) parts.push(`peso ${l.weight}kg`)
+    if (l.mood != null) parts.push(`humor ${l.mood}/5`)
+    if (l.energy != null) parts.push(`energia ${l.energy}/5`)
+    if (l.steps != null) parts.push(`${l.steps} passos`)
+    if (l.workout_type) parts.push(`treino ${l.workout_type}${l.workout_duration ? ` (${l.workout_duration}min)` : ''}`)
+    if (l.symptoms && l.symptoms.length > 0) parts.push(`sintomas: ${l.symptoms.join(', ')}`)
+    return `${l.date}: ${parts.length > 0 ? parts.join(', ') : 'sem dados'}`
+  })
+  return lines.join('\n')
+}
+
+const HEALTH_CORRELATION_PROMPT = `Você tem acesso aos registros de saúde do usuário (sono, água, peso, humor, energia, treinos, passos). Use esses dados para fazer correlações e insights personalizados. Exemplos:
+- Se o usuário dorme menos de 6h e o humor cai, mencione isso
+- Se a hidratação está baixa e o usuário reclama de cansaço, relacione
+- Se o peso subiu após um fim de semana, contextualize com os dados de alimentação
+- Celebre conquistas: 7 dias seguidos acima de 8.000 passos, meta de água atingida, etc.`
+
 const TACO_PROMPT_SECTION = `Você é Kai, um coach de alimentação brasileiro. Para todas as informações nutricionais, use como referência principal a TACO — Tabela Brasileira de Composição de Alimentos (UNICAMP, 4ª edição).
 
 Quando mencionar calorias, macronutrientes ou composição de alimentos, baseie-se nos valores da TACO. Priorize sempre alimentos típicos da dieta brasileira e seus valores reais conforme a tabela TACO.
@@ -52,7 +75,7 @@ Exemplos de referência TACO que você deve conhecer:
 
 Quando sugerir substituições, prefira sempre opções presentes na TACO com perfil nutricional similar. Mencione explicitamente que seus valores são baseados na TACO quando relevante.`
 
-function buildSystemPrompt(profile: UserProfile, dietSummary: string) {
+function buildSystemPrompt(profile: UserProfile, dietSummary: string, healthSummary: string) {
   return `${TACO_PROMPT_SECTION}
 
 Sua abordagem é terapêutica e acolhedora. Fale sempre em primeira pessoa como Kai. Seu tom é curioso, encorajador, nunca julgador. Nunca use: 'errado', 'proibido', 'excesso', 'traiu a dieta', 'pecado'.
@@ -60,6 +83,11 @@ Sua abordagem é terapêutica e acolhedora. Fale sempre em primeira pessoa como 
 Quando o usuário tem dieta ativa, use-a como referência neutra, nunca como régua de julgamento. Se divergir da dieta, mencione de forma neutra e ofereça substituição apenas se perguntado ou se a divergência for grande.
 
 Faça perguntas abertas apenas após identificar padrão em 3+ refeições. Sempre termine com algo encorajador.
+
+${HEALTH_CORRELATION_PROMPT}
+
+Registros de saúde dos últimos 7 dias (mais recente por último):
+${healthSummary}
 
 Objetivo: ${profile.goal ? (GOAL_LABELS[profile.goal] ?? profile.goal) : 'não definido'}. Meta calórica: ${profile.daily_calories_goal ?? 'não definida'} kcal. Dieta ativa: ${dietSummary}. Estilo: ${profile.coaching_style === 'direct' ? 'direto' : 'acolhedor'}.`
 }
@@ -112,8 +140,19 @@ export async function POST(request: Request) {
     .order('created_at', { ascending: false })
     .limit(10)
 
+  const since = new Date()
+  since.setDate(since.getDate() - 6)
+  const { data: healthLogs } = await supabase
+    .from('health_logs')
+    .select('*')
+    .eq('user_id', user.id)
+    .gte('date', since.toISOString().slice(0, 10))
+    .order('date', { ascending: true })
+    .returns<HealthLog[]>()
+
   const dietSummary = buildDietSummary(activeDiet?.meals_json ?? null)
-  const systemPrompt = buildSystemPrompt(profile, dietSummary)
+  const healthSummary = buildHealthSummary(healthLogs ?? [])
+  const systemPrompt = buildSystemPrompt(profile, dietSummary, healthSummary)
 
   const history = (recentMessages ?? [])
     .slice()

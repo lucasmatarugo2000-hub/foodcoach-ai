@@ -10,17 +10,21 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from 'recharts'
 import { createClient } from '@/lib/supabase/client'
-import { caloriesByDay, bioimpedanceSeries } from '@/lib/charts'
+import { caloriesByDay, bioimpedanceSeries, healthLogsByDay } from '@/lib/charts'
 import { CHART_COLORS, chartTooltipStyle } from '@/lib/chartTheme'
 import { formatDateFull } from '@/lib/format'
+import { DEFAULT_WATER_GOAL_ML } from '@/lib/health'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
-import type { Bioimpedance, Meal, UserProfile } from '@/types'
+import type { Bioimpedance, HealthLog, Meal, UserProfile } from '@/types'
 
 export default function ProgressPage() {
   const supabase = createClient()
@@ -28,6 +32,7 @@ export default function ProgressPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [meals, setMeals] = useState<Meal[]>([])
   const [bioRecords, setBioRecords] = useState<Bioimpedance[]>([])
+  const [healthLogs, setHealthLogs] = useState<HealthLog[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -42,8 +47,9 @@ export default function ProgressPage() {
 
       const cutoff = new Date()
       cutoff.setDate(cutoff.getDate() - 30)
+      const cutoffDate = cutoff.toISOString().slice(0, 10)
 
-      const [{ data: profileData }, { data: mealsData }, { data: bioData }] = await Promise.all([
+      const [{ data: profileData }, { data: mealsData }, { data: bioData }, { data: healthData }] = await Promise.all([
         supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
         supabase
           .from('meals')
@@ -58,11 +64,19 @@ export default function ProgressPage() {
           .eq('user_id', user.id)
           .order('date', { ascending: true })
           .returns<Bioimpedance[]>(),
+        supabase
+          .from('health_logs')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('date', cutoffDate)
+          .order('date', { ascending: true })
+          .returns<HealthLog[]>(),
       ])
 
       setProfile(profileData ?? null)
       setMeals(mealsData ?? [])
       setBioRecords(bioData ?? [])
+      setHealthLogs(healthData ?? [])
       setLoading(false)
     }
     load()
@@ -73,6 +87,23 @@ export default function ProgressPage() {
 
   const goalCalories = profile?.daily_calories_goal ?? 2000
   const calSeriesWithGoal = calorieSeries.map((d) => ({ ...d, goal: goalCalories }))
+
+  const waterGoal = profile?.water_goal_ml ?? DEFAULT_WATER_GOAL_ML
+  const healthDaily = healthLogsByDay(healthLogs, 30)
+  const healthDailyWithGoal = healthDaily.map((d) => ({ ...d, water_goal: waterGoal }))
+  const sleepMoodScatter = healthDaily
+    .filter((d) => d.sleep_hours !== null && d.mood !== null)
+    .map((d) => ({ sleep_hours: d.sleep_hours, mood: d.mood, label: d.label }))
+
+  const last7HealthLogs = healthLogs.filter((l) => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 6)
+    return l.date >= cutoff.toISOString().slice(0, 10)
+  })
+  const sleepValues7d = last7HealthLogs.map((l) => l.sleep_hours).filter((v): v is number => v !== null)
+  const moodValues7d = last7HealthLogs.map((l) => l.mood).filter((v): v is number => v !== null)
+  const avgSleep7d = sleepValues7d.length > 0 ? sleepValues7d.reduce((a, b) => a + b, 0) / sleepValues7d.length : null
+  const avgMood7d = moodValues7d.length > 0 ? moodValues7d.reduce((a, b) => a + b, 0) / moodValues7d.length : null
 
   const latest = bioRecords.length > 0 ? bioRecords[bioRecords.length - 1] : null
   const first = bioRecords.length > 0 ? bioRecords[0] : null
@@ -154,6 +185,158 @@ export default function ProgressPage() {
           </div>
         )}
       </div>
+
+      {/* Health hub insight + charts */}
+      <div className="mb-5 rounded-2xl border border-primary/30 bg-primary/10 p-4">
+        <h2 className="mb-1 text-sm font-semibold text-primary">Insight do Kai</h2>
+        <p className="text-xs text-white/70">
+          {avgSleep7d !== null || avgMood7d !== null ? (
+            <>
+              Nos últimos 7 dias você dormiu em média {avgSleep7d !== null ? avgSleep7d.toFixed(1) : '—'}h
+              {avgMood7d !== null ? ` e seu humor foi ${avgMood7d.toFixed(1)}/5.` : '.'}
+            </>
+          ) : (
+            'Registre seu sono, água, peso e humor no Hub de Saúde para receber insights personalizados aqui.'
+          )}
+        </p>
+      </div>
+
+      {healthLogs.length > 0 && (
+        <>
+          <div className="mb-5 rounded-2xl border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold text-white/70">Sono — últimos 30 dias</h2>
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthDaily} margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: CHART_COLORS.neutral }} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_COLORS.neutral }} width={30} domain={[0, 12]} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line
+                    type="monotone"
+                    dataKey="sleep_hours"
+                    name="Sono (h)"
+                    stroke={CHART_COLORS.series2}
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold text-white/70">Hidratação vs. meta — últimos 30 dias</h2>
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthDailyWithGoal} margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: CHART_COLORS.neutral }} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_COLORS.neutral }} width={36} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line
+                    type="monotone"
+                    dataKey="water_ml"
+                    name="Água (ml)"
+                    stroke={CHART_COLORS.series3}
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="water_goal"
+                    name="Meta"
+                    stroke={CHART_COLORS.neutral}
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold text-white/70">Peso e tendência — últimos 30 dias</h2>
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={healthDaily} margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: CHART_COLORS.neutral }} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_COLORS.neutral }} width={36} domain={['auto', 'auto']} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line
+                    type="monotone"
+                    dataKey="weight"
+                    name="Peso (kg)"
+                    stroke={CHART_COLORS.series1}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weight_trend"
+                    name="Tendência"
+                    stroke={CHART_COLORS.neutral}
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold text-white/70">Passos — últimos 30 dias</h2>
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={healthDaily} margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: CHART_COLORS.neutral }} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_COLORS.neutral }} width={36} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar dataKey="steps" name="Passos" fill={CHART_COLORS.series4} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {sleepMoodScatter.length > 0 && (
+            <div className="mb-5 rounded-2xl border border-border bg-card p-4">
+              <h2 className="mb-3 text-sm font-semibold text-white/70">Sono x Humor</h2>
+              <div className="h-44 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
+                    <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" />
+                    <XAxis
+                      type="number"
+                      dataKey="sleep_hours"
+                      name="Sono (h)"
+                      tick={{ fontSize: 10, fill: CHART_COLORS.neutral }}
+                      domain={[0, 12]}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="mood"
+                      name="Humor"
+                      tick={{ fontSize: 10, fill: CHART_COLORS.neutral }}
+                      width={30}
+                      domain={[1, 5]}
+                    />
+                    <ZAxis range={[60, 60]} />
+                    <Tooltip {...chartTooltipStyle} cursor={{ strokeDasharray: '3 3' }} />
+                    <Scatter data={sleepMoodScatter} fill={CHART_COLORS.series2} />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Bioimpedance charts */}
       {bioSeries.length > 0 && (
