@@ -36,9 +36,15 @@ export default function HealthPage() {
   const [previousWeight, setPreviousWeight] = useState<number | null>(null)
   const [latestCycle, setLatestCycle] = useState<MenstrualCycle | null>(null)
   const [loading, setLoading] = useState(true)
+  const [pending, setPending] = useState<Partial<HealthLog>>({})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true)
+    if (!silent) {
+      setLoading(true)
+      setPending({})
+    }
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -106,21 +112,28 @@ export default function HealthPage() {
     })
   }
 
-  async function upsertField(fields: Partial<HealthLog>): Promise<boolean | undefined> {
-    if (!userId) return
+  function updatePending(fields: Partial<HealthLog>) {
+    setPending((prev) => ({ ...prev, ...fields }))
+  }
+
+  async function saveAll() {
+    if (!userId || Object.keys(pending).length === 0) return
+    setSaving(true)
     const key = dateKey(selectedDate)
     const { data, error } = await supabase
       .from('health_logs')
-      .upsert({ user_id: userId, date: key, data_source: 'manual', ...fields }, { onConflict: 'user_id,date' })
+      .upsert({ user_id: userId, date: key, data_source: 'manual', ...pending }, { onConflict: 'user_id,date' })
       .select()
       .single<HealthLog>()
+    setSaving(false)
     if (!error && data) {
       setLog(data)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
       router.refresh()
-      return true
+      return
     }
     console.error('health_logs upsert error', error)
-    return false
   }
 
   async function registerCycle(fields: NewCycleFields): Promise<boolean | undefined> {
@@ -142,7 +155,7 @@ export default function HealthPage() {
   const isToday = dateKey(selectedDate) >= dateKey(new Date())
 
   return (
-    <div className="min-h-screen px-4 pb-28 pt-16">
+    <div className="min-h-screen px-4 pb-48 pt-16">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
 
       <h1 className="mb-3 text-xl font-bold">Minha Saúde</h1>
@@ -172,16 +185,29 @@ export default function HealthPage() {
         <p className="text-sm text-white/50">Carregando...</p>
       ) : (
         <div key={dateKey(selectedDate)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <SleepCard log={log} onSave={upsertField} />
-          <WaterCard log={log} goalMl={profile?.water_goal_ml ?? DEFAULT_WATER_GOAL_ML} onSave={upsertField} />
-          <WeightCard log={log} previousWeight={previousWeight} onSave={upsertField} />
-          <MoodEnergyCard log={log} onSave={upsertField} />
-          <WorkoutCard log={log} onSave={upsertField} />
-          <StepsCard log={log} onSave={upsertField} />
-          <SymptomsCard log={log} onSave={upsertField} />
+          <SleepCard log={log} onChange={updatePending} />
+          <WaterCard log={log} goalMl={profile?.water_goal_ml ?? DEFAULT_WATER_GOAL_ML} onChange={updatePending} />
+          <WeightCard log={log} previousWeight={previousWeight} onChange={updatePending} />
+          <MoodEnergyCard log={log} onChange={updatePending} />
+          <WorkoutCard log={log} onChange={updatePending} />
+          <StepsCard log={log} onChange={updatePending} />
+          <SymptomsCard log={log} onChange={updatePending} />
           {profile?.gender === 'female' && <CycleCard cycle={latestCycle} onRegister={registerCycle} />}
         </div>
       )}
+
+      <div className="fixed bottom-16 left-0 right-0 z-40 border-t border-border bg-background px-4 py-3">
+        <button
+          type="button"
+          onClick={saveAll}
+          disabled={saving || loading}
+          className={`mx-auto block w-full max-w-md rounded-xl py-3 text-sm font-bold transition disabled:opacity-50 ${
+            saved ? 'bg-primary/15 text-primary' : 'bg-primary text-black'
+          }`}
+        >
+          {saving ? 'Salvando...' : saved ? '✓ Informações salvas!' : 'Salvar informações do dia'}
+        </button>
+      </div>
 
       <BottomNav />
     </div>

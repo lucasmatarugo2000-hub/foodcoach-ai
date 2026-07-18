@@ -1,30 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Footprints } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
-import SaveButton from './SaveButton'
 import { DEFAULT_STEPS_GOAL } from '@/lib/health'
 import type { HealthLog } from '@/types'
 
 interface StepsCardProps {
   log: HealthLog | null
-  onSave: (fields: Partial<HealthLog>) => Promise<boolean | undefined>
+  onChange: (fields: Partial<HealthLog>) => void
 }
 
-export default function StepsCard({ log, onSave }: StepsCardProps) {
+export default function StepsCard({ log, onChange }: StepsCardProps) {
   const [steps, setSteps] = useState(log?.steps?.toString() ?? '')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
 
-  async function commit() {
-    setSaving(true)
-    const ok = await onSave({ steps: steps ? Number(steps) || null : null })
-    setSaving(false)
-    if (ok) {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }
+  useEffect(() => {
+    onChange({ steps: steps ? Number(steps) || null : null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function update(v: string) {
+    setSteps(v)
+    onChange({ steps: v ? Number(v) || null : null })
   }
 
   const value = log?.steps ?? 0
@@ -35,7 +32,7 @@ export default function StepsCard({ log, onSave }: StepsCardProps) {
       <input
         type="number"
         value={steps}
-        onChange={(e) => setSteps(e.target.value)}
+        onChange={(e) => update(e.target.value)}
         placeholder="0"
         className="w-full rounded-lg px-2 py-2 text-sm"
       />
@@ -45,7 +42,6 @@ export default function StepsCard({ log, onSave }: StepsCardProps) {
       <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-border">
         <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
       </div>
-      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

@@ -1,42 +1,36 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Droplet } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
-import SaveButton from './SaveButton'
 import { formatWaterMl, WATER_QUICK_ADD } from '@/lib/health'
 import type { HealthLog } from '@/types'
 
 interface WaterCardProps {
   log: HealthLog | null
   goalMl: number
-  onSave: (fields: Partial<HealthLog>) => Promise<boolean | undefined>
+  onChange: (fields: Partial<HealthLog>) => void
 }
 
-export default function WaterCard({ log, goalMl, onSave }: WaterCardProps) {
-  const savedMl = log?.water_ml ?? 0
-  const [pendingAdd, setPendingAdd] = useState(0)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+export default function WaterCard({ log, goalMl, onChange }: WaterCardProps) {
+  const [current, setCurrent] = useState(log?.water_ml ?? 0)
 
-  const current = savedMl + pendingAdd
+  useEffect(() => {
+    onChange({ water_ml: current })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function add(amount: number) {
+    const next = current + amount
+    setCurrent(next)
+    onChange({ water_ml: next })
+  }
+
   const pct = Math.min(100, Math.round((current / goalMl) * 100))
   const barColor = pct < 40 ? '#ef4444' : pct < 80 ? '#f59e0b' : 'rgb(var(--color-primary))'
 
-  async function commit() {
-    if (pendingAdd === 0) return
-    setSaving(true)
-    const ok = await onSave({ water_ml: current })
-    setSaving(false)
-    if (ok) {
-      setPendingAdd(0)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }
-  }
-
   return (
-    <HealthCardShell icon={<Droplet size={16} className="text-primary" />} title="Água" filled={savedMl > 0}>
+    <HealthCardShell icon={<Droplet size={16} className="text-primary" />} title="Água" filled={(log?.water_ml ?? 0) > 0}>
       <p className="text-lg font-bold">
         {formatWaterMl(current)} <span className="text-sm font-normal text-white/40">/ {formatWaterMl(goalMl)}</span>
       </p>
@@ -48,14 +42,13 @@ export default function WaterCard({ log, goalMl, onSave }: WaterCardProps) {
           <button
             key={amount}
             type="button"
-            onClick={() => setPendingAdd((p) => p + amount)}
+            onClick={() => add(amount)}
             className="flex-1 rounded-lg border border-border py-1.5 text-xs font-semibold text-white/80"
           >
             +{amount}ml
           </button>
         ))}
       </div>
-      <SaveButton onClick={commit} saving={saving} saved={saved} disabled={pendingAdd === 0} />
     </HealthCardShell>
   )
 }

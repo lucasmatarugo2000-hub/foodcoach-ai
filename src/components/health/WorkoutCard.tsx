@@ -1,38 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Dumbbell } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
-import SaveButton from './SaveButton'
 import { WORKOUT_TYPES } from '@/lib/health'
 import type { HealthLog } from '@/types'
 
 interface WorkoutCardProps {
   log: HealthLog | null
-  onSave: (fields: Partial<HealthLog>) => Promise<boolean | undefined>
+  onChange: (fields: Partial<HealthLog>) => void
 }
 
-export default function WorkoutCard({ log, onSave }: WorkoutCardProps) {
+export default function WorkoutCard({ log, onChange }: WorkoutCardProps) {
   const [type, setType] = useState<string | null>(log?.workout_type ?? null)
   const [duration, setDuration] = useState(log?.workout_duration?.toString() ?? '')
   const [calories, setCalories] = useState(log?.workout_calories?.toString() ?? '')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
 
-  async function commit() {
+  function report(t: string | null, d: string, c: string) {
     const fields: Partial<HealthLog> = {}
-    if (type) fields.workout_type = type
-    if (duration) fields.workout_duration = Number(duration) || null
-    if (calories) fields.workout_calories = Number(calories) || null
-    if (Object.keys(fields).length === 0) return
+    if (t) fields.workout_type = t
+    if (d) fields.workout_duration = Number(d) || null
+    if (c) fields.workout_calories = Number(c) || null
+    onChange(fields)
+  }
 
-    setSaving(true)
-    const ok = await onSave(fields)
-    setSaving(false)
-    if (ok) {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }
+  useEffect(() => {
+    report(type, duration, calories)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function updateType(t: string) {
+    setType(t)
+    report(t, duration, calories)
+  }
+  function updateDuration(v: string) {
+    setDuration(v)
+    report(type, v, calories)
+  }
+  function updateCalories(v: string) {
+    setCalories(v)
+    report(type, duration, v)
   }
 
   return (
@@ -42,7 +49,7 @@ export default function WorkoutCard({ log, onSave }: WorkoutCardProps) {
           <button
             key={w.value}
             type="button"
-            onClick={() => setType(w.value)}
+            onClick={() => updateType(w.value)}
             className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${
               type === w.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-white/70'
             }`}
@@ -55,19 +62,18 @@ export default function WorkoutCard({ log, onSave }: WorkoutCardProps) {
         <input
           type="number"
           value={duration}
-          onChange={(e) => setDuration(e.target.value)}
+          onChange={(e) => updateDuration(e.target.value)}
           placeholder="Minutos"
           className="w-full rounded-lg px-2 py-1.5 text-sm"
         />
         <input
           type="number"
           value={calories}
-          onChange={(e) => setCalories(e.target.value)}
+          onChange={(e) => updateCalories(e.target.value)}
           placeholder="Kcal (opc.)"
           className="w-full rounded-lg px-2 py-1.5 text-sm"
         />
       </div>
-      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

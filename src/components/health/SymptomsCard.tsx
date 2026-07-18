@@ -1,34 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
-import SaveButton from './SaveButton'
 import { SYMPTOM_OPTIONS } from '@/lib/health'
 import type { HealthLog } from '@/types'
 
 interface SymptomsCardProps {
   log: HealthLog | null
-  onSave: (fields: Partial<HealthLog>) => Promise<boolean | undefined>
+  onChange: (fields: Partial<HealthLog>) => void
 }
 
-export default function SymptomsCard({ log, onSave }: SymptomsCardProps) {
+export default function SymptomsCard({ log, onChange }: SymptomsCardProps) {
   const [selected, setSelected] = useState<string[]>(log?.symptoms ?? [])
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    onChange({ symptoms: selected })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function toggle(symptom: string) {
-    setSelected((prev) => (prev.includes(symptom) ? prev.filter((s) => s !== symptom) : [...prev, symptom]))
-  }
-
-  async function commit() {
-    setSaving(true)
-    const ok = await onSave({ symptoms: selected })
-    setSaving(false)
-    if (ok) {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }
+    setSelected((prev) => {
+      const next = prev.includes(symptom) ? prev.filter((s) => s !== symptom) : [...prev, symptom]
+      onChange({ symptoms: next })
+      return next
+    })
   }
 
   return (
@@ -47,7 +43,6 @@ export default function SymptomsCard({ log, onSave }: SymptomsCardProps) {
           </button>
         ))}
       </div>
-      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

@@ -1,9 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Smile } from 'lucide-react'
 import HealthCardShell from './HealthCardShell'
-import SaveButton from './SaveButton'
 import type { HealthLog } from '@/types'
 
 // One mouth curve per mood level, 1 (very sad) through 5 (very happy).
@@ -38,28 +37,32 @@ function MoodFace({ level, active, onClick }: MoodFaceProps) {
 
 interface MoodEnergyCardProps {
   log: HealthLog | null
-  onSave: (fields: Partial<HealthLog>) => Promise<boolean | undefined>
+  onChange: (fields: Partial<HealthLog>) => void
 }
 
-export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
+export default function MoodEnergyCard({ log, onChange }: MoodEnergyCardProps) {
   const [mood, setMood] = useState(log?.mood ?? 0)
   const [energy, setEnergy] = useState(log?.energy ?? 0)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
 
-  async function commit() {
+  function report(m: number, e: number) {
     const fields: Partial<HealthLog> = {}
-    if (mood > 0) fields.mood = mood
-    if (energy > 0) fields.energy = energy
-    if (Object.keys(fields).length === 0) return
+    if (m > 0) fields.mood = m
+    if (e > 0) fields.energy = e
+    onChange(fields)
+  }
 
-    setSaving(true)
-    const ok = await onSave(fields)
-    setSaving(false)
-    if (ok) {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }
+  useEffect(() => {
+    report(mood, energy)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function updateMood(n: number) {
+    setMood(n)
+    report(n, energy)
+  }
+  function updateEnergy(n: number) {
+    setEnergy(n)
+    report(mood, n)
   }
 
   return (
@@ -71,7 +74,7 @@ export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
       <p className="mb-1.5 text-[11px] text-white/50">Humor</p>
       <div className="mb-3 flex justify-between px-1">
         {[1, 2, 3, 4, 5].map((n) => (
-          <MoodFace key={n} level={n} active={mood === n} onClick={() => setMood(n)} />
+          <MoodFace key={n} level={n} active={mood === n} onClick={() => updateMood(n)} />
         ))}
       </div>
       <p className="mb-1.5 text-[11px] text-white/50">Energia</p>
@@ -80,14 +83,13 @@ export default function MoodEnergyCard({ log, onSave }: MoodEnergyCardProps) {
           <button
             key={n}
             type="button"
-            onClick={() => setEnergy(n)}
+            onClick={() => updateEnergy(n)}
             aria-label={`Energia ${n}`}
             className="h-2 flex-1 rounded-full transition-colors"
             style={{ backgroundColor: energy >= n ? 'rgb(var(--color-primary))' : 'rgb(var(--color-border))' }}
           />
         ))}
       </div>
-      <SaveButton onClick={commit} saving={saving} saved={saved} />
     </HealthCardShell>
   )
 }

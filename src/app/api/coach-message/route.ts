@@ -140,12 +140,16 @@ export async function POST(request: Request) {
     .order('eaten_at', { ascending: false })
     .limit(10)
 
-  const { data: recentMessages } = await supabase
+  const startOfDay = new Date()
+  startOfDay.setHours(0, 0, 0, 0)
+
+  const { data: todaysMessages } = await supabase
     .from('coach_messages')
     .select('*')
     .eq('user_id', user.id)
+    .gte('created_at', startOfDay.toISOString())
     .order('created_at', { ascending: false })
-    .limit(10)
+    .limit(20)
 
   const since = new Date()
   since.setDate(since.getDate() - 6)
@@ -176,13 +180,20 @@ export async function POST(request: Request) {
   const healthSummary = buildHealthSummary(healthLogs ?? [])
   const systemPrompt = buildSystemPrompt(profile, dietSummary, healthSummary, cycleContext)
 
-  const history = (recentMessages ?? [])
-    .slice()
-    .reverse()
-    .map((m) => ({
-      role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: m.message,
-    }))
+  // Ascending chronological order — oldest of today's (up to 20) messages first,
+  // current turn appended last. Anthropic requires strictly alternating
+  // user/assistant roles, so consecutive same-role rows (e.g. two user
+  // messages in a row) are merged rather than sent as separate turns.
+  const history: { role: 'user' | 'assistant'; content: string }[] = []
+  for (const m of (todaysMessages ?? []).slice().reverse()) {
+    const role: 'user' | 'assistant' = m.role === 'user' ? 'user' : 'assistant'
+    const last = history[history.length - 1]
+    if (last && last.role === role) {
+      last.content += `\n${m.message}`
+    } else {
+      history.push({ role, content: m.message })
+    }
+  }
 
   let turnText: string
   if (body.meal_data) {
@@ -214,13 +225,19 @@ export async function POST(request: Request) {
     }
   }
 
+  if (history[history.length - 1]?.role === 'user') {
+    history[history.length - 1]!.content += `\n${turnText}`
+  } else {
+    history.push({ role: 'user', content: turnText })
+  }
+
   try {
     const anthropic = getAnthropicClient()
     const response = await anthropic.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: 2000,
       system: systemPrompt,
-      messages: [...history, { role: 'user', content: turnText }],
+      messages: history,
     })
 
     const textBlock = response.content.find((b) => b.type === 'text')
