@@ -60,10 +60,10 @@ export default function BottomNav() {
         style={{ background: 'linear-gradient(90deg, rgb(var(--color-primary)), rgb(var(--color-secondary)))' }}
       />
       <div className="mx-auto flex max-w-md items-center justify-between px-1 py-2">
-        <Link href="/home" className="flex flex-1 items-center justify-center text-[10px]">
+        <Link href="/coach" className="flex flex-1 items-center justify-center text-[10px]">
           <span
             className={`flex flex-col items-center gap-1 rounded-xl px-1.5 py-1 transition-colors ${
-              pathname.startsWith('/home') ? 'bg-primary/15' : ''
+              pathname.startsWith('/coach') ? 'bg-primary/15' : ''
             }`}
           >
             <Home size={20} strokeWidth={2} className="text-primary" />

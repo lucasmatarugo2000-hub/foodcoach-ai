@@ -85,7 +85,7 @@ export default function OnboardingPage() {
       return
     }
 
-    router.push(wantsDietUpload ? '/diet' : '/home')
+    router.push(wantsDietUpload ? '/diet' : '/coach')
     router.refresh()
   }
 

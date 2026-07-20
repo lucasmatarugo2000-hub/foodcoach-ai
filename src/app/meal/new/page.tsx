@@ -187,7 +187,7 @@ export default function NewMealPage() {
 
     // No need to notify the coach separately — /api/chat always pulls today's
     // meals fresh from the database, so Kai already sees this on the next turn.
-    router.push('/home')
+    router.push('/coach')
     router.refresh()
   }
 

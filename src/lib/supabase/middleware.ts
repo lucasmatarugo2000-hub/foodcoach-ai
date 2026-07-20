@@ -40,7 +40,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && isAuthPage) {
-    const redirectUrl = new URL('/home', request.url)
+    const redirectUrl = new URL('/coach', request.url)
     return NextResponse.redirect(redirectUrl)
   }
 
@@ -55,7 +55,7 @@ export async function updateSession(request: NextRequest) {
     const isNutriArea = path.startsWith('/nutri')
 
     if (isNutriArea && !isNutritionist) {
-      return NextResponse.redirect(new URL('/home', request.url))
+      return NextResponse.redirect(new URL('/coach', request.url))
     }
     if (!isNutriArea && isNutritionist) {
       return NextResponse.redirect(new URL('/nutri/dashboard', request.url))

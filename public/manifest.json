@@ -2,7 +2,7 @@
   "name": "FoodCoach AI",
   "short_name": "FoodCoach",
   "description": "Seu coach de alimentação com IA",
-  "start_url": "/home",
+  "start_url": "/coach",
   "display": "standalone",
   "background_color": "#0d1117",
   "theme_color": "#0d1117",

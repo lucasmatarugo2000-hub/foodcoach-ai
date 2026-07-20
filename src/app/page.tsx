@@ -21,5 +21,5 @@ export default async function RootPage() {
     redirect('/onboarding')
   }
 
-  redirect(profile.role === 'nutritionist' ? '/nutri/dashboard' : '/home')
+  redirect(profile.role === 'nutritionist' ? '/nutri/dashboard' : '/coach')
 }
