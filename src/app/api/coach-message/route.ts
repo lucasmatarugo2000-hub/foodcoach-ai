@@ -4,9 +4,15 @@ import { getAnthropicClient, CLAUDE_MODEL } from '@/lib/anthropic'
 import { createClient } from '@/lib/supabase/server'
 import { buildCycleContextPrompt, getCoachPersonaPrompt } from '@/lib/coach'
 import { computeCycleStatus } from '@/lib/cycle'
+import { runHealthExtraction } from '@/lib/healthExtraction'
 import type { DietMealsJson, HealthLog, Meal, MenstrualCycle, UserProfile } from '@/types'
 
 export const runtime = 'nodejs'
+
+interface ConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 interface CoachMessageRequest {
   meal_id?: string | null
@@ -19,6 +25,7 @@ interface CoachMessageRequest {
     meal_type?: string | null
   } | null
   user_message?: string | null
+  conversationHistory?: ConversationTurn[]
 }
 
 const GOAL_LABELS: Record<string, string> = {
@@ -140,17 +147,6 @@ export async function POST(request: Request) {
     .order('eaten_at', { ascending: false })
     .limit(10)
 
-  const startOfDay = new Date()
-  startOfDay.setHours(0, 0, 0, 0)
-
-  const { data: todaysMessages } = await supabase
-    .from('coach_messages')
-    .select('*')
-    .eq('user_id', user.id)
-    .gte('created_at', startOfDay.toISOString())
-    .order('created_at', { ascending: false })
-    .limit(20)
-
   const since = new Date()
   since.setDate(since.getDate() - 6)
   const { data: healthLogs } = await supabase
@@ -180,18 +176,21 @@ export async function POST(request: Request) {
   const healthSummary = buildHealthSummary(healthLogs ?? [])
   const systemPrompt = buildSystemPrompt(profile, dietSummary, healthSummary, cycleContext)
 
-  // Ascending chronological order — oldest of today's (up to 20) messages first,
-  // current turn appended last. Anthropic requires strictly alternating
-  // user/assistant roles, so consecutive same-role rows (e.g. two user
-  // messages in a row) are merged rather than sent as separate turns.
-  const history: { role: 'user' | 'assistant'; content: string }[] = []
-  for (const m of (todaysMessages ?? []).slice().reverse()) {
-    const role: 'user' | 'assistant' = m.role === 'user' ? 'user' : 'assistant'
+  // The client is the source of truth for conversation history — it holds the
+  // full local message state and passes it explicitly on every turn. Trim to
+  // the last 30 to bound token usage, and normalize roles defensively.
+  // Anthropic requires strictly alternating user/assistant roles, so
+  // consecutive same-role turns (which shouldn't happen from a well-formed
+  // client, but might from a stale cache) are merged rather than sent as
+  // separate turns.
+  const history: ConversationTurn[] = []
+  for (const turn of (body.conversationHistory ?? []).slice(-30)) {
+    const role: 'user' | 'assistant' = turn.role === 'user' ? 'user' : 'assistant'
     const last = history[history.length - 1]
     if (last && last.role === role) {
-      last.content += `\n${m.message}`
+      last.content += `\n${turn.content}`
     } else {
-      history.push({ role, content: m.message })
+      history.push({ role, content: turn.content })
     }
   }
 
@@ -209,58 +208,38 @@ export async function POST(request: Request) {
     turnText = `Aqui estão minhas últimas refeições: ${summary || 'nenhuma refeição registrada ainda'}. O que você acha?`
   }
 
-  // Persist the user's message immediately — before calling Anthropic — so it
-  // survives even when the downstream AI call fails (billing/rate-limit/etc).
-  if (body.user_message) {
-    const { error: userInsertError } = await supabase.from('coach_messages').insert({
-      user_id: user.id,
-      meal_id: body.meal_id ?? null,
-      message: body.user_message,
-      type: 'comment',
-      sender: 'user',
-      role: 'user',
-    })
-    if (userInsertError) {
-      console.error('coach_messages user insert error', userInsertError)
-    }
-  }
-
   if (history[history.length - 1]?.role === 'user') {
     history[history.length - 1]!.content += `\n${turnText}`
   } else {
     history.push({ role: 'user', content: turnText })
   }
 
+  // Extract/save any health data mentioned in this turn in parallel with the
+  // main chat call, so both finish together instead of doubling latency.
+  const extractionPromise = body.user_message
+    ? runHealthExtraction(supabase, user.id, body.user_message)
+    : Promise.resolve(null)
+
   try {
     const anthropic = getAnthropicClient()
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages: history,
-    })
+    const [response, extraction] = await Promise.all([
+      anthropic.messages.create({
+        model: CLAUDE_MODEL,
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: history,
+      }),
+      extractionPromise,
+    ])
 
     const textBlock = response.content.find((b) => b.type === 'text')
     const kaiMessage = textBlock && textBlock.type === 'text' ? textBlock.text : ''
 
-    const { data: saved, error: saveError } = await supabase
-      .from('coach_messages')
-      .insert({
-        user_id: user.id,
-        meal_id: body.meal_id ?? null,
-        message: kaiMessage,
-        type: 'comment',
-        sender: 'kai',
-        role: 'assistant',
-      })
-      .select()
-      .single()
-
-    if (saveError) {
-      console.error('coach_messages insert error', saveError)
-    }
-
-    return NextResponse.json({ message: kaiMessage, id: saved?.id ?? null })
+    return NextResponse.json({
+      message: kaiMessage,
+      healthDataSaved: extraction?.extracted ?? false,
+      savedFields: extraction?.savedFields ?? [],
+    })
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) {
       console.error('coach-message: Anthropic authentication failed — check ANTHROPIC_API_KEY', err.message)

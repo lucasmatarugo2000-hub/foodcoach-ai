@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { DEFAULT_WATER_GOAL_ML } from '@/lib/health'
+import { requireSession } from '@/lib/requireSession'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
 import SleepCard from '@/components/health/SleepCard'
@@ -39,6 +40,7 @@ export default function HealthPage() {
   const [pending, setPending] = useState<Partial<HealthLog>>({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) {
@@ -118,15 +120,34 @@ export default function HealthPage() {
 
   async function saveAll() {
     if (!userId || Object.keys(pending).length === 0) return
+    setSaveError(null)
+
+    const session = await requireSession(supabase)
+    if (!session) {
+      router.push('/login')
+      return
+    }
+    if (session.user.id !== userId) {
+      console.error('saveAll: session user_id mismatch', { sessionUserId: session.user.id, userId })
+    }
+
     setSaving(true)
     const key = dateKey(selectedDate)
+    const payload = { user_id: session.user.id, date: key, data_source: 'manual', ...pending }
+
+    for (const [field, value] of Object.entries(pending)) {
+      console.log(`Salvando campo "${field}":`, value)
+    }
+    console.log('Salvando health_logs (upsert completo):', payload)
+
     const { data, error } = await supabase
       .from('health_logs')
-      .upsert({ user_id: userId, date: key, data_source: 'manual', ...pending }, { onConflict: 'user_id,date' })
+      .upsert(payload, { onConflict: 'user_id,date' })
       .select()
       .single<HealthLog>()
     setSaving(false)
     if (!error && data) {
+      console.log('health_logs upsert bem-sucedido:', data)
       setLog(data)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -134,6 +155,11 @@ export default function HealthPage() {
       return
     }
     console.error('health_logs upsert error', error)
+    setSaveError(
+      error
+        ? `Erro ao salvar: ${error.message}${error.code ? ` (código ${error.code})` : ''}`
+        : 'Erro ao salvar: nenhum dado retornado pelo Supabase.'
+    )
   }
 
   async function registerCycle(fields: NewCycleFields): Promise<boolean | undefined> {
@@ -197,6 +223,9 @@ export default function HealthPage() {
       )}
 
       <div className="fixed bottom-16 left-0 right-0 z-40 border-t border-border bg-background px-4 py-3">
+        {saveError && (
+          <p className="mx-auto mb-2 max-w-md text-center text-xs text-danger">{saveError}</p>
+        )}
         <button
           type="button"
           onClick={saveAll}

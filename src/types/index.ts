@@ -239,6 +239,8 @@ export interface ExtractHealthDataResult {
   data?: HealthLog
   saved?: HealthLog
   message?: string
+  savedFields?: string[]
+  error?: { message: string; code?: string; details?: string | null; hint?: string | null }
 }
 
 // Ciclo menstrual ---------------------------------------------------------

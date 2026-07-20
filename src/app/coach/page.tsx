@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2 } from 'lucide-react'
+import { Camera, CheckCircle2, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { currentMealType } from '@/lib/dietComparison'
 import { greetingPrefix, displayNameFromEmail } from '@/lib/format'
 import { getCoachInfo } from '@/lib/coach'
+import { requireSession } from '@/lib/requireSession'
 import ChatBubble from '@/components/ChatBubble'
 import SubstitutionCard from '@/components/SubstitutionCard'
 import BottomNav from '@/components/BottomNav'
@@ -25,10 +26,30 @@ type ChatItem =
   | { kind: 'message'; id: string; sender: CoachSender; message: string; createdAt: string }
   | { kind: 'substitutions'; id: string; items: Substitution[] }
   | { kind: 'health_confirmation'; id: string; message: string }
+  | { kind: 'photo'; id: string; photoUrl: string; caption: string }
+
+interface ConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 function isSubstitutionRequest(text: string): boolean {
   const lower = text.toLowerCase()
   return lower.includes('substituir') || lower.includes('no lugar de')
+}
+
+/** Builds the Claude-facing history from local chat state — text messages and
+ * photo turns count, substitution cards / confirmation pills don't. */
+function itemsToHistory(items: ChatItem[]): ConversationTurn[] {
+  const turns: ConversationTurn[] = []
+  for (const item of items) {
+    if (item.kind === 'message') {
+      turns.push({ role: item.sender === 'user' ? 'user' : 'assistant', content: item.message })
+    } else if (item.kind === 'photo') {
+      turns.push({ role: 'user', content: item.caption })
+    }
+  }
+  return turns
 }
 
 export default function CoachPage() {
@@ -42,7 +63,10 @@ export default function CoachPage() {
   const [dietPlan, setDietPlan] = useState<DietMealsJson | null>(null)
   const [name, setName] = useState('')
   const [gender, setGender] = useState<Gender | null>(null)
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null)
+  const [sendingPhoto, setSendingPhoto] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
   const coach = getCoachInfo(gender)
   const CoachAvatar = coach.avatar
 
@@ -104,8 +128,18 @@ export default function CoachPage() {
   async function handleSend() {
     const text = input.trim()
     if (!text || sending) return
+
+    const session = await requireSession(supabase)
+    if (!session) {
+      router.push('/login')
+      return
+    }
+    const user = session.user
+
     setInput('')
     setSending(true)
+
+    const conversationHistory = itemsToHistory(items)
 
     const userItem: ChatItem = {
       kind: 'message',
@@ -117,17 +151,6 @@ export default function CoachPage() {
     setItems((prev) => [...prev, userItem])
     setKaiState('thinking')
 
-    const extractionPromise = fetch('/api/extract-health-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
-    })
-      .then((res) => (res.ok ? (res.json() as Promise<ExtractHealthDataResult>) : null))
-      .catch((err) => {
-        console.error('extract-health-data request failed', err)
-        return null
-      })
-
     try {
       if (isSubstitutionRequest(text)) {
         const mealType = currentMealType()
@@ -136,21 +159,27 @@ export default function CoachPage() {
           ? prescribed.foods.map((f) => `${f.name} ${f.quantity}`).join(', ')
           : 'sua refeição atual'
 
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
         // Persist the user's message before calling the API so it survives
         // even if suggest-substitution subsequently fails.
-        if (user) {
-          await supabase.from('coach_messages').insert({
-            user_id: user.id,
-            message: text,
-            type: 'substitution',
-            sender: 'user',
-            role: 'user',
+        const { error: userInsertError } = await supabase.from('coach_messages').insert({
+          user_id: user.id,
+          message: text,
+          type: 'substitution',
+          sender: 'user',
+          role: 'user',
+        })
+        if (userInsertError) console.error('coach_messages user insert error', userInsertError)
+
+        const extractionPromise = fetch('/api/extract-health-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        })
+          .then((res) => (res.ok ? (res.json() as Promise<ExtractHealthDataResult>) : null))
+          .catch((err) => {
+            console.error('extract-health-data request failed', err)
+            return null
           })
-        }
 
         const res = await fetch('/api/suggest-substitution', {
           method: 'POST',
@@ -160,55 +189,95 @@ export default function CoachPage() {
         const data = await res.json()
         const substitutions: Substitution[] = data.substitutions ?? []
 
-        if (user) {
-          const summary = substitutions
-            .map((s) => `${s.name} (${s.quantity}) — ${s.calories} kcal: ${s.reason}`)
-            .join('\n')
-          await supabase.from('coach_messages').insert({
+        const summary = substitutions
+          .map((s) => `${s.name} (${s.quantity}) — ${s.calories} kcal: ${s.reason}`)
+          .join('\n')
+        const { error: kaiInsertError } = await supabase.from('coach_messages').insert({
+          user_id: user.id,
+          message: summary || 'Não encontrei boas substituições agora — pode tentar detalhar mais?',
+          type: 'substitution',
+          sender: 'kai',
+          role: 'assistant',
+        })
+        if (kaiInsertError) console.error('coach_messages kai insert error', kaiInsertError)
+
+        setItems((prev) => [...prev, { kind: 'substitutions', id: `sub-${Date.now()}`, items: substitutions }])
+        talkThenIdle()
+
+        const extraction = await extractionPromise
+        if ((extraction?.extracted || extraction?.success) && extraction.message) {
+          setItems((prev) => [
+            ...prev,
+            { kind: 'health_confirmation', id: `health-${Date.now()}`, message: extraction.message as string },
+          ])
+          router.refresh()
+        }
+      } else {
+        // Persist the user's message before calling the API so it survives
+        // even if the downstream Claude call subsequently fails.
+        const { data: userRow, error: userInsertError } = await supabase
+          .from('coach_messages')
+          .insert({
             user_id: user.id,
-            message: summary || 'Não encontrei boas substituições agora — pode tentar detalhar mais?',
-            type: 'substitution',
-            sender: 'kai',
-            role: 'assistant',
+            message: text,
+            type: 'comment',
+            sender: 'user',
+            role: 'user',
           })
+          .select()
+          .single()
+        if (userInsertError) {
+          console.error('coach_messages user insert error', userInsertError)
+        } else if (userRow) {
+          setItems((prev) => prev.map((item) => (item.id === userItem.id ? { ...item, id: userRow.id } : item)))
         }
 
-        setItems((prev) => [
-          ...prev,
-          { kind: 'substitutions', id: `sub-${Date.now()}`, items: substitutions },
-        ])
-        talkThenIdle()
-      } else {
         const res = await fetch('/api/coach-message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_message: text }),
+          body: JSON.stringify({ user_message: text, conversationHistory }),
         })
         const data = await res.json()
         if (!res.ok) {
           console.error('coach-message request failed', res.status, data)
           throw new Error(data?.error ?? 'coach-message request failed')
         }
+
+        const { data: kaiRow, error: kaiInsertError } = await supabase
+          .from('coach_messages')
+          .insert({
+            user_id: user.id,
+            message: data.message,
+            type: 'comment',
+            sender: 'kai',
+            role: 'assistant',
+          })
+          .select()
+          .single()
+        if (kaiInsertError) console.error('coach_messages kai insert error', kaiInsertError)
+
         setItems((prev) => [
           ...prev,
           {
             kind: 'message',
-            id: data.id ?? `kai-${Date.now()}`,
+            id: kaiRow?.id ?? `kai-${Date.now()}`,
             sender: 'kai',
             message: data.message,
             createdAt: new Date().toISOString(),
           },
         ])
         talkThenIdle()
-        router.refresh()
-      }
 
-      const extraction = await extractionPromise
-      if ((extraction?.extracted || extraction?.success) && extraction.message) {
-        setItems((prev) => [
-          ...prev,
-          { kind: 'health_confirmation', id: `health-${Date.now()}`, message: extraction.message as string },
-        ])
+        if (data.healthDataSaved && Array.isArray(data.savedFields) && data.savedFields.length > 0) {
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: 'health_confirmation',
+              id: `health-${Date.now()}`,
+              message: `Dados salvos: ${data.savedFields.join(', ')}`,
+            },
+          ])
+        }
         router.refresh()
       }
     } catch (err) {
@@ -228,6 +297,99 @@ export default function CoachPage() {
       ])
       setKaiState('idle')
     } finally {
+      setSending(false)
+    }
+  }
+
+  function handlePhotoChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setPendingPhoto(reader.result as string)
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  async function sendPhoto() {
+    if (!pendingPhoto || sendingPhoto) return
+
+    const session = await requireSession(supabase)
+    if (!session) {
+      router.push('/login')
+      return
+    }
+
+    const photoDataUrl = pendingPhoto
+    setPendingPhoto(null)
+    setSendingPhoto(true)
+    setSending(true)
+    setKaiState('thinking')
+
+    const conversationHistory = itemsToHistory(items)
+    const photoItemId = `photo-${Date.now()}`
+    setItems((prev) => [
+      ...prev,
+      { kind: 'photo', id: photoItemId, photoUrl: photoDataUrl, caption: '[Foto de refeição enviada]' },
+    ])
+
+    try {
+      const res = await fetch('/api/analyze-meal-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: photoDataUrl, conversationHistory }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('analyze-meal-chat request failed', res.status, data)
+        throw new Error(data?.error ?? 'analyze-meal-chat request failed')
+      }
+
+      await supabase.from('coach_messages').insert({
+        user_id: session.user.id,
+        message: '[Foto de refeição enviada]',
+        type: 'comment',
+        sender: 'user',
+        role: 'user',
+      })
+      const { data: kaiRow } = await supabase
+        .from('coach_messages')
+        .insert({
+          user_id: session.user.id,
+          message: data.message,
+          type: 'comment',
+          sender: 'kai',
+          role: 'assistant',
+        })
+        .select()
+        .single()
+
+      setItems((prev) => [
+        ...prev,
+        {
+          kind: 'message',
+          id: kaiRow?.id ?? `kai-${Date.now()}`,
+          sender: 'kai',
+          message: data.message,
+          createdAt: new Date().toISOString(),
+        },
+      ])
+      talkThenIdle()
+      router.refresh()
+    } catch (err) {
+      console.error('sendPhoto error', err)
+      setItems((prev) => [
+        ...prev,
+        {
+          kind: 'message',
+          id: `err-${Date.now()}`,
+          sender: 'kai',
+          message: 'Não consegui analisar essa foto agora. Pode tentar de novo?',
+          createdAt: new Date().toISOString(),
+        },
+      ])
+      setKaiState('idle')
+    } finally {
+      setSendingPhoto(false)
       setSending(false)
     }
   }
@@ -261,16 +423,30 @@ export default function CoachPage() {
             Diga oi para {coach.name === 'Luna' ? 'a Luna' : 'o Kai'} e comece a conversar sobre sua alimentação.
           </p>
         ) : (
-          items.map((item) =>
-            item.kind === 'message' ? (
-              <ChatBubble key={item.id} sender={item.sender} message={item.message} timestamp={item.createdAt} />
-            ) : item.kind === 'substitutions' ? (
-              <div key={item.id} className="flex justify-start">
-                <div className="w-[85%]">
-                  <SubstitutionCard substitutions={item.items} />
+          items.map((item) => {
+            if (item.kind === 'message') {
+              return <ChatBubble key={item.id} sender={item.sender} message={item.message} timestamp={item.createdAt} />
+            }
+            if (item.kind === 'substitutions') {
+              return (
+                <div key={item.id} className="flex justify-start">
+                  <div className="w-[85%]">
+                    <SubstitutionCard substitutions={item.items} />
+                  </div>
                 </div>
-              </div>
-            ) : (
+              )
+            }
+            if (item.kind === 'photo') {
+              return (
+                <div key={item.id} className="flex justify-end">
+                  <div className="h-24 w-24 overflow-hidden rounded-2xl border border-border shadow-md shadow-black/10">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.photoUrl} alt="Foto da refeição enviada" className="h-full w-full object-cover" />
+                  </div>
+                </div>
+              )
+            }
+            return (
               <div key={item.id} className="flex justify-start">
                 <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
                   <CheckCircle2 size={14} className="shrink-0" />
@@ -278,12 +454,54 @@ export default function CoachPage() {
                 </div>
               </div>
             )
-          )
+          })
         )}
       </div>
 
       <div className="shrink-0 border-t border-border bg-[#f8fafc] px-4 py-3 dark:bg-background">
+        {pendingPhoto && (
+          <div className="mx-auto mb-3 flex max-w-md items-center gap-3 rounded-xl border border-border bg-card p-2">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={pendingPhoto} alt="Prévia da foto" className="h-full w-full object-cover" />
+            </div>
+            <p className="flex-1 text-xs text-white/60">Foto pronta para envio</p>
+            <button
+              type="button"
+              onClick={() => setPendingPhoto(null)}
+              aria-label="Cancelar foto"
+              className="rounded-lg p-1.5 text-white/50 hover:text-danger"
+            >
+              <X size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={sendPhoto}
+              disabled={sendingPhoto}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-50"
+            >
+              {sendingPhoto ? 'Enviando...' : 'Enviar foto'}
+            </button>
+          </div>
+        )}
         <div className="mx-auto flex max-w-md gap-2">
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handlePhotoChosen}
+          />
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={sending}
+            aria-label="Tirar foto da refeição"
+            className="shrink-0 rounded-xl border border-border px-3 text-white/70 disabled:opacity-40"
+          >
+            <Camera size={20} />
+          </button>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
