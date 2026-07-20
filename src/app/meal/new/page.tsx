@@ -185,22 +185,8 @@ export default function NewMealPage() {
       return
     }
 
-    fetch('/api/coach-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        meal_id: savedMeal.id,
-        meal_data: {
-          food_name: adjusted.food_name,
-          calories: adjusted.calories,
-          protein: adjusted.protein,
-          carbs: adjusted.carbs,
-          fat: adjusted.fat,
-          meal_type: mealType,
-        },
-      }),
-    }).catch((err) => console.error('coach-message (post-meal) failed', err))
-
+    // No need to notify the coach separately — /api/chat always pulls today's
+    // meals fresh from the database, so Kai already sees this on the next turn.
     router.push('/home')
     router.refresh()
   }

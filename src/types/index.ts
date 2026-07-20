@@ -216,6 +216,20 @@ export interface HealthLog {
   created_at: string
 }
 
+export interface ExtractedMeal {
+  food_name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  portion: string
+}
+
+export interface ExtractedBioimpedance {
+  body_fat_pct: number | null
+  muscle_mass: number | null
+}
+
 export interface ExtractedHealthData {
   sleep_start: string | null
   sleep_end: string | null
@@ -231,6 +245,8 @@ export interface ExtractedHealthData {
   steps: number | null
   symptoms: string[] | null
   period_started: boolean | null
+  meal: ExtractedMeal | null
+  bioimpedance: ExtractedBioimpedance | null
 }
 
 export interface ExtractHealthDataResult {

@@ -1,384 +1,581 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  RadialBarChart,
-  RadialBar,
-  PolarAngleAxis,
-  ResponsiveContainer,
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from 'recharts'
-import { UtensilsCrossed, TrendingUp, Scale, MessageCircle, Flame } from 'lucide-react'
+import { Camera, CheckCircle2, Droplet, Dumbbell, Moon, Scale, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { isSameDay, mealTypeLabel, statusBadge, formatTime, greetingPrefix, displayNameFromEmail } from '@/lib/format'
-import { caloriesByWeekday, deriveMacroTargets, computeStreak } from '@/lib/charts'
-import { CHART_COLORS, darkChartTooltipStyle } from '@/lib/chartTheme'
+import { currentMealType } from '@/lib/dietComparison'
+import { greetingPrefix, displayNameFromEmail } from '@/lib/format'
+import { formatSleepHours } from '@/lib/health'
 import { getCoachInfo } from '@/lib/coach'
-import { motivationalQuoteOfTheDay } from '@/lib/motivational-quotes'
+import { requireSession } from '@/lib/requireSession'
+import ChatBubble from '@/components/ChatBubble'
+import SubstitutionCard from '@/components/SubstitutionCard'
 import BottomNav from '@/components/BottomNav'
 import ThemeToggle from '@/components/ThemeToggle'
-import RecommendationCard from '@/components/RecommendationCard'
-import type { CoachMessage, Meal, Recommendation, UserProfile } from '@/types'
+import type { CoachMessage, CoachSender, DietMealsJson, Gender, KaiState, Substitution } from '@/types'
+
+type ChatItem =
+  | { kind: 'message'; id: string; sender: CoachSender; message: string; createdAt: string }
+  | { kind: 'substitutions'; id: string; items: Substitution[] }
+  | { kind: 'health_confirmation'; id: string; message: string }
+  | { kind: 'photo'; id: string; photoUrl: string }
+
+type QuickPromptKind = 'sono' | 'treino' | 'peso'
+
+const QUICK_PROMPTS: Record<QuickPromptKind, string> = {
+  sono: 'Que horas você dormiu e acordou?',
+  treino: 'Que tipo de treino você fez e por quanto tempo?',
+  peso: 'Qual é o seu peso atual?',
+}
+
+const WATER_QUICK_AMOUNTS = [200, 500, 1000] as const
+
+function isSubstitutionRequest(text: string): boolean {
+  const lower = text.toLowerCase()
+  return lower.includes('substituir') || lower.includes('no lugar de')
+}
+
+function buildWelcomeMessage(params: {
+  name: string
+  yesterdayCalories: number | null
+  yesterdaySleepHours: number | null
+  goalCalories: number | null
+}): string {
+  const parts = [`${greetingPrefix()}${params.name ? `, ${params.name}` : ''}!`]
+
+  const yesterdayBits: string[] = []
+  if (params.yesterdayCalories !== null) yesterdayBits.push(`você consumiu ${params.yesterdayCalories} kcal`)
+  if (params.yesterdaySleepHours !== null) yesterdayBits.push(`dormiu ${formatSleepHours(params.yesterdaySleepHours)}`)
+  if (yesterdayBits.length > 0) parts.push(`Ontem ${yesterdayBits.join(' e ')}.`)
+
+  if (params.goalCalories) parts.push(`Hoje sua meta é ${params.goalCalories} kcal.`)
+
+  const hour = new Date().getHours()
+  parts.push(hour < 10 ? 'Como foi seu café da manhã?' : 'Como posso te ajudar hoje?')
+
+  return parts.join(' ')
+}
+
+function ChipButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-white/80 transition disabled:opacity-40"
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
 
 export default function HomePage() {
   const router = useRouter()
   const supabase = createClient()
-  const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [name, setName] = useState('')
-  const [motivationalPhrase] = useState(() => motivationalQuoteOfTheDay())
-  const [todayMeals, setTodayMeals] = useState<Meal[]>([])
-  const [recentMeals, setRecentMeals] = useState<Meal[]>([])
-  const [lastMessage, setLastMessage] = useState<CoachMessage | null>(null)
-  const [latestRec, setLatestRec] = useState<Recommendation | null>(null)
+  const [items, setItems] = useState<ChatItem[]>([])
+  const [input, setInput] = useState('')
+  const [kaiState, setKaiState] = useState<KaiState>('idle')
   const [loading, setLoading] = useState(true)
-  const coach = getCoachInfo(profile?.gender ?? null)
+  const [sending, setSending] = useState(false)
+  const [dietPlan, setDietPlan] = useState<DietMealsJson | null>(null)
+  const [gender, setGender] = useState<Gender | null>(null)
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null)
+  const [showWaterQuick, setShowWaterQuick] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const coach = getCoachInfo(gender)
   const CoachAvatar = coach.avatar
 
-  const load = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
+  useEffect(() => {
+    async function load() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        setLoading(false)
+        return
+      }
+      const displayName = displayNameFromEmail(user.email)
+
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
+
+      const [{ data: messages }, { data: diet }, { data: profile }] = await Promise.all([
+        supabase
+          .from('coach_messages')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', startOfToday.toISOString())
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('diet_plans')
+          .select('meals_json')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle<{ meals_json: DietMealsJson }>(),
+        supabase
+          .from('users_profile')
+          .select('gender, daily_calories_goal')
+          .eq('id', user.id)
+          .maybeSingle<{ gender: Gender | null; daily_calories_goal: number | null }>(),
+      ])
+
+      setDietPlan(diet?.meals_json ?? null)
+      setGender(profile?.gender ?? null)
+
+      if ((messages ?? []).length === 0) {
+        // First message of the day — greet with yesterday's context instead
+        // of a blank screen.
+        const startOfYesterday = new Date(startOfToday)
+        startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+        const yesterdayKey = startOfYesterday.toISOString().slice(0, 10)
+
+        const [{ data: yesterdayMeals }, { data: yesterdayLog }] = await Promise.all([
+          supabase
+            .from('meals')
+            .select('calories')
+            .eq('user_id', user.id)
+            .gte('eaten_at', startOfYesterday.toISOString())
+            .lt('eaten_at', startOfToday.toISOString()),
+          supabase
+            .from('health_logs')
+            .select('sleep_hours')
+            .eq('user_id', user.id)
+            .eq('date', yesterdayKey)
+            .maybeSingle<{ sleep_hours: number | null }>(),
+        ])
+
+        const yesterdayCalories = (yesterdayMeals ?? []).reduce((s, m) => s + (m.calories ?? 0), 0)
+
+        const welcomeText = buildWelcomeMessage({
+          name: displayName,
+          yesterdayCalories: yesterdayCalories > 0 ? yesterdayCalories : null,
+          yesterdaySleepHours: yesterdayLog?.sleep_hours ?? null,
+          goalCalories: profile?.daily_calories_goal ?? null,
+        })
+
+        const { data: welcomeRow, error: welcomeError } = await supabase
+          .from('coach_messages')
+          .insert({ user_id: user.id, message: welcomeText, type: 'comment', sender: 'kai', role: 'assistant' })
+          .select()
+          .single()
+        if (welcomeError) console.error('coach_messages welcome insert error', welcomeError)
+
+        setItems([
+          {
+            kind: 'message',
+            id: welcomeRow?.id ?? `welcome-${Date.now()}`,
+            sender: 'kai',
+            message: welcomeText,
+            createdAt: new Date().toISOString(),
+          },
+        ])
+      } else {
+        setItems(
+          (messages ?? []).map((m: CoachMessage) => ({
+            kind: 'message',
+            id: m.id,
+            sender: m.sender,
+            message: m.message,
+            createdAt: m.created_at,
+          }))
+        )
+      }
+
       setLoading(false)
-      return
     }
-    setName(displayNameFromEmail(user.email))
-
-    const since = new Date()
-    since.setDate(since.getDate() - 30)
-
-    const [{ data: profileData }, { data: mealsData }, { data: messagesData }, { data: recData }] = await Promise.all([
-      supabase.from('users_profile').select('*').eq('id', user.id).maybeSingle<UserProfile>(),
-      supabase
-        .from('meals')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('eaten_at', since.toISOString())
-        .order('eaten_at', { ascending: false })
-        .returns<Meal[]>(),
-      supabase
-        .from('coach_messages')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('sender', 'kai')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .returns<CoachMessage[]>(),
-      supabase
-        .from('recommendations')
-        .select('*')
-        .eq('client_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .returns<Recommendation[]>(),
-    ])
-
-    setProfile(profileData ?? null)
-    const today = new Date()
-    const all = mealsData ?? []
-    setTodayMeals(all.filter((m) => isSameDay(new Date(m.eaten_at), today)))
-    setRecentMeals(all)
-    setLastMessage(messagesData?.[0] ?? null)
-    setLatestRec(recData?.[0] ?? null)
-    setLoading(false)
+    load()
   }, [supabase])
 
   useEffect(() => {
-    load()
-    const interval = setInterval(load, 30000)
-    return () => clearInterval(interval)
-  }, [load])
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [items, kaiState])
 
-  useEffect(() => {
-    function onFocus() {
-      load()
-      router.refresh()
-    }
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [load, router])
-
-  const totalCalories = todayMeals.reduce((s, m) => s + m.calories, 0)
-  const goalCalories = profile?.daily_calories_goal ?? 2000
-  const progressPct = Math.min(100, Math.round((totalCalories / goalCalories) * 100))
-
-  const gaugeColor = progressPct < 70 ? CHART_COLORS.primary : progressPct < 95 ? '#f59e0b' : '#ef4444'
-
-  const macroTargets = useMemo(() => deriveMacroTargets(goalCalories), [goalCalories])
-  const macros = [
-    {
-      label: 'Proteína',
-      value: Math.round(todayMeals.reduce((s, m) => s + m.protein, 0)),
-      target: macroTargets.protein,
-      color: CHART_COLORS.series1,
-    },
-    {
-      label: 'Carbo',
-      value: Math.round(todayMeals.reduce((s, m) => s + m.carbs, 0)),
-      target: macroTargets.carbs,
-      color: CHART_COLORS.series2,
-    },
-    {
-      label: 'Gordura',
-      value: Math.round(todayMeals.reduce((s, m) => s + m.fat, 0)),
-      target: macroTargets.fat,
-      color: CHART_COLORS.accent,
-    },
-  ]
-
-  const streak = useMemo(() => computeStreak(recentMeals), [recentMeals])
-
-  const weeklyData = useMemo(
-    () => caloriesByWeekday(recentMeals).map((d) => ({ ...d, goal: goalCalories })),
-    [recentMeals, goalCalories]
-  )
-
-  if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-muted">Carregando...</div>
+  function talkThenIdle() {
+    setKaiState('talking')
+    setTimeout(() => setKaiState('idle'), 3000)
   }
 
+  async function sendMessage(rawText: string) {
+    const text = rawText.trim()
+    if (!text || sending) return
+
+    const session = await requireSession(supabase)
+    if (!session) {
+      router.push('/login')
+      return
+    }
+    const user = session.user
+
+    setSending(true)
+    setShowWaterQuick(false)
+    setItems((prev) => [
+      ...prev,
+      { kind: 'message', id: `local-${Date.now()}`, sender: 'user', message: text, createdAt: new Date().toISOString() },
+    ])
+    setKaiState('thinking')
+
+    try {
+      if (isSubstitutionRequest(text)) {
+        const mealType = currentMealType()
+        const prescribed = dietPlan?.meals.find((m) => m.meal_type === mealType)
+        const prescribedMeal = prescribed
+          ? prescribed.foods.map((f) => `${f.name} ${f.quantity}`).join(', ')
+          : 'sua refeição atual'
+
+        // /api/suggest-substitution doesn't persist messages itself, so we
+        // save the user's turn before calling it — resilient to failures.
+        const { error: userInsertError } = await supabase.from('coach_messages').insert({
+          user_id: user.id,
+          message: text,
+          type: 'substitution',
+          sender: 'user',
+          role: 'user',
+        })
+        if (userInsertError) console.error('coach_messages user insert error', userInsertError)
+
+        const res = await fetch('/api/suggest-substitution', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prescribed_meal: prescribedMeal, eaten_food: text }),
+        })
+        const data = await res.json()
+        const substitutions: Substitution[] = data.substitutions ?? []
+
+        const summary = substitutions
+          .map((s) => `${s.name} (${s.quantity}) — ${s.calories} kcal: ${s.reason}`)
+          .join('\n')
+        const { error: kaiInsertError } = await supabase.from('coach_messages').insert({
+          user_id: user.id,
+          message: summary || 'Não encontrei boas substituições agora — pode tentar detalhar mais?',
+          type: 'substitution',
+          sender: 'kai',
+          role: 'assistant',
+        })
+        if (kaiInsertError) console.error('coach_messages kai insert error', kaiInsertError)
+
+        setItems((prev) => [...prev, { kind: 'substitutions', id: `sub-${Date.now()}`, items: substitutions }])
+        talkThenIdle()
+      } else {
+        // /api/chat handles context, persistence (user + assistant turns) and
+        // automatic data extraction/saving on its own — nothing to insert here.
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, userId: user.id }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          console.error('chat request failed', res.status, data)
+          throw new Error(data?.error ?? 'chat request failed')
+        }
+
+        setItems((prev) => [
+          ...prev,
+          { kind: 'message', id: `kai-${Date.now()}`, sender: 'kai', message: data.message, createdAt: new Date().toISOString() },
+        ])
+        talkThenIdle()
+
+        if (data.healthDataSaved && Array.isArray(data.savedFields) && data.savedFields.length > 0) {
+          setItems((prev) => [
+            ...prev,
+            { kind: 'health_confirmation', id: `health-${Date.now()}`, message: `Registrado: ${data.savedFields.join(', ')}` },
+          ])
+        }
+        router.refresh()
+      }
+    } catch (err) {
+      console.error('chat error', err)
+      const isApiError = err instanceof Error && err.message !== 'chat request failed'
+      setItems((prev) => [
+        ...prev,
+        {
+          kind: 'message',
+          id: `err-${Date.now()}`,
+          sender: 'kai',
+          message: isApiError
+            ? `Não consegui responder: ${(err as Error).message}`
+            : 'Tive um problema para responder agora. Pode tentar de novo?',
+          createdAt: new Date().toISOString(),
+        },
+      ])
+      setKaiState('idle')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleSend() {
+    const text = input
+    setInput('')
+    sendMessage(text)
+  }
+
+  function handlePhotoChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setPendingPhoto(reader.result as string)
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  async function sendPhoto() {
+    if (!pendingPhoto || sending) return
+
+    const session = await requireSession(supabase)
+    if (!session) {
+      router.push('/login')
+      return
+    }
+
+    const photoDataUrl = pendingPhoto
+    setPendingPhoto(null)
+    setSending(true)
+    setKaiState('thinking')
+    setItems((prev) => [...prev, { kind: 'photo', id: `photo-${Date.now()}`, photoUrl: photoDataUrl }])
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: photoDataUrl, userId: session.user.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('chat (photo) request failed', res.status, data)
+        throw new Error(data?.error ?? 'chat request failed')
+      }
+
+      setItems((prev) => [
+        ...prev,
+        { kind: 'message', id: `kai-${Date.now()}`, sender: 'kai', message: data.message, createdAt: new Date().toISOString() },
+      ])
+      talkThenIdle()
+
+      if (data.healthDataSaved && Array.isArray(data.savedFields) && data.savedFields.length > 0) {
+        setItems((prev) => [
+          ...prev,
+          { kind: 'health_confirmation', id: `health-${Date.now()}`, message: `Registrado: ${data.savedFields.join(', ')}` },
+        ])
+      }
+      router.refresh()
+    } catch (err) {
+      console.error('sendPhoto error', err)
+      setItems((prev) => [
+        ...prev,
+        {
+          kind: 'message',
+          id: `err-${Date.now()}`,
+          sender: 'kai',
+          message: 'Não consegui analisar essa foto agora. Pode tentar de novo?',
+          createdAt: new Date().toISOString(),
+        },
+      ])
+      setKaiState('idle')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function pushCannedKaiMessage(text: string) {
+    talkThenIdle()
+    setItems((prev) => [
+      ...prev,
+      { kind: 'message', id: `kai-${Date.now()}`, sender: 'kai', message: text, createdAt: new Date().toISOString() },
+    ])
+    const session = await requireSession(supabase)
+    if (!session) return
+    const { error } = await supabase
+      .from('coach_messages')
+      .insert({ user_id: session.user.id, message: text, type: 'comment', sender: 'kai', role: 'assistant' })
+    if (error) console.error('coach_messages canned insert error', error)
+  }
+
+  function handleQuickChip(kind: 'foto' | 'agua' | QuickPromptKind) {
+    if (sending) return
+    if (kind === 'foto') {
+      photoInputRef.current?.click()
+      return
+    }
+    if (kind === 'agua') {
+      setShowWaterQuick(true)
+      pushCannedKaiMessage('Quantos ml você tomou?')
+      return
+    }
+    pushCannedKaiMessage(QUICK_PROMPTS[kind])
+    inputRef.current?.focus()
+  }
+
+  const coachLabel = coach.name === 'Luna' ? 'a Luna' : 'o Kai'
+
   return (
-    <div className="min-h-screen pb-28">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#f8fafc] pb-16 dark:bg-background">
       <ThemeToggle className="fixed right-4 top-4 z-50" />
 
-      <div className="animate-fade-in-up px-4 pb-2 pt-6">
-        <span className="gradient-text text-lg font-extrabold tracking-tight">FoodCoach AI</span>
+      <div className="shrink-0 flex items-center gap-3 border-b border-border bg-card px-4 py-3">
+        <div className="h-10 w-10 shrink-0">
+          <CoachAvatar state={kaiState} size={40} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold">{coach.name}</p>
+          <p className="flex items-center gap-1.5 text-[11px] text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            Online
+          </p>
+        </div>
       </div>
 
-      {/* Gradient hero header — primary → secondary */}
-      <div
-        className="relative px-4 pb-20 pt-4"
-        style={{
-          background: 'linear-gradient(90deg, rgb(var(--color-primary)) 0%, rgb(var(--color-secondary)) 100%)',
-          minHeight: '32vh',
-        }}
-      >
-        <p className="text-sm text-[#ffffff]/80">{greetingPrefix()}</p>
-        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-[#ffffff]">{name || 'bem-vindo(a)'}</h1>
-        <p className="mt-3 max-w-xs text-xs italic text-[#ffffff]/70">{motivationalPhrase}</p>
-      </div>
-
-      <div className="px-4">
-        {/* Floating calorie gauge card — overlaps the header */}
-        <div className="relative z-10 -mt-14 animate-fade-in-up rounded-2xl border border-border bg-card p-5 shadow-2xl shadow-black/40">
-          <div className="relative mx-auto h-40 w-40">
-            <ResponsiveContainer width="100%" height="100%">
-              <RadialBarChart
-                innerRadius="75%"
-                outerRadius="100%"
-                data={[{ value: progressPct }]}
-                startAngle={225}
-                endAngle={-45}
-                barSize={14}
-              >
-                <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                <RadialBar
-                  background={{ fill: 'rgb(var(--color-border))' }}
-                  dataKey="value"
-                  cornerRadius={8}
-                  fill={gaugeColor}
-                  isAnimationActive
-                  animationBegin={150}
-                  animationDuration={1100}
-                  animationEasing="ease-out"
-                />
-              </RadialBarChart>
-            </ResponsiveContainer>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-3xl font-extrabold tracking-tight">{progressPct}%</span>
-              <span className="text-[11px] text-muted">
-                {totalCalories} / {goalCalories} kcal
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-2">
-            {macros.map((m) => {
-              const pct = m.target > 0 ? Math.min(100, Math.round((m.value / m.target) * 100)) : 0
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {loading ? (
+          <p className="text-center text-sm text-white/40">Carregando conversa...</p>
+        ) : items.length === 0 ? (
+          <p className="text-center text-sm text-white/40">Diga oi para {coachLabel} e comece a conversar.</p>
+        ) : (
+          items.map((item) => {
+            if (item.kind === 'message') {
+              return <ChatBubble key={item.id} sender={item.sender} message={item.message} timestamp={item.createdAt} />
+            }
+            if (item.kind === 'substitutions') {
               return (
-                <div key={m.label} className="rounded-xl border border-border bg-background px-2.5 py-2">
-                  <div className="flex items-center justify-between text-[10px] text-muted">
-                    <span>{m.label}</span>
-                  </div>
-                  <div className="mt-0.5 text-sm font-bold">{m.value}g</div>
-                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: m.color }} />
+                <div key={item.id} className="flex justify-start">
+                  <div className="w-[85%]">
+                    <SubstitutionCard substitutions={item.items} />
                   </div>
                 </div>
               )
-            })}
-          </div>
-        </div>
-
-        {/* Streak + quick stat */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="flex animate-fade-in-up items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-md shadow-black/10">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/15">
-              <Flame size={20} className="text-accent" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xl font-extrabold leading-none">{streak}</div>
-              <div className="text-[11px] text-muted">{streak === 1 ? 'dia seguido' : 'dias seguidos'}</div>
-            </div>
-          </div>
-          <div className="flex animate-fade-in-up items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-md shadow-black/10">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15">
-              <UtensilsCrossed size={20} className="text-primary" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xl font-extrabold leading-none">{todayMeals.length}</div>
-              <div className="text-[11px] text-muted">refeições hoje</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2×2 shortcut grid */}
-        <div className="mt-8 grid grid-cols-2 gap-3">
-          <ShortcutCard href="/meal/new" Icon={UtensilsCrossed} label="Registrar refeição" from="#00d4aa" to="#00695c" />
-          <ShortcutCard href="/progress" Icon={TrendingUp} label="Minha evolução" from="#7c3aed" to="#4c1d95" />
-          <ShortcutCard href="/bioimpedance" Icon={Scale} label="Bioimpedância" from="#3b82f6" to="#1d4ed8" />
-          <ShortcutCard href="/coach" Icon={MessageCircle} label={`Falar com ${coach.name}`} from="#f59e0b" to="#b45309" />
-        </div>
-
-        {/* Weekly calories bar chart */}
-        {recentMeals.length > 0 && (
-          <div className="mt-8">
-            <h2 className="mb-3 text-sm font-bold tracking-tight text-white/70">Calorias esta semana</h2>
-            <div className="h-40 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={weeklyData} margin={{ left: -20, right: 8, top: 4, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="weeklyBarGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity={1} />
-                      <stop offset="100%" stopColor={CHART_COLORS.secondary} stopOpacity={0.55} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: CHART_COLORS.neutral }} />
-                  <YAxis hide />
-                  <Tooltip {...darkChartTooltipStyle} cursor={{ fill: 'rgb(var(--color-border))', opacity: 0.3 }} />
-                  <Bar dataKey="calories" name="Calorias" fill="url(#weeklyBarGradient)" radius={[8, 8, 8, 8]} maxBarSize={26} />
-                  <Line
-                    type="monotone"
-                    dataKey="goal"
-                    name="Meta"
-                    stroke={CHART_COLORS.accent}
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                    dot={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
-
-        {/* Latest recommendation from nutritionist */}
-        {latestRec && (
-          <div className="mt-8">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-bold tracking-tight text-white/70">Do seu nutricionista</h2>
-              <Link href="/recommendations" className="text-xs text-primary">
-                Ver todas
-              </Link>
-            </div>
-            <RecommendationCard recommendation={latestRec} />
-          </div>
-        )}
-
-        {/* Coach message */}
-        {lastMessage && (
-          <Link href="/coach" className="mt-8 block">
-            <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-md shadow-black/10">
-              <CoachAvatar state="idle" size={60} />
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-primary">{coach.name}</div>
-                <p className="line-clamp-2 text-sm text-white/70">{lastMessage.message}</p>
-              </div>
-            </div>
-          </Link>
-        )}
-
-        {/* Today's meals */}
-        <div className="mt-8">
-          <h2 className="mb-3 text-sm font-bold tracking-tight text-white/70">Refeições de hoje</h2>
-          {todayMeals.length === 0 ? (
-            <p className="text-sm text-muted">Nenhuma refeição registrada ainda.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {todayMeals.map((meal) => {
-                const badge = statusBadge(meal.diet_comparison?.status)
-                const BadgeIcon = badge.Icon
-                return (
-                  <div key={meal.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-border">
-                      {meal.photo_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={meal.photo_url} alt={meal.food_name} className="h-full w-full object-cover" />
-                      ) : (
-                        <UtensilsCrossed size={20} className="text-muted" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{meal.food_name}</div>
-                      <div className="text-xs text-muted">
-                        {mealTypeLabel(meal.meal_type)} · {formatTime(meal.eaten_at)} · {meal.calories} kcal
-                      </div>
-                    </div>
-                    <BadgeIcon size={20} style={{ color: badge.color }} aria-label={badge.label} />
+            }
+            if (item.kind === 'photo') {
+              return (
+                <div key={item.id} className="flex justify-end">
+                  <div className="h-24 w-24 overflow-hidden rounded-2xl border border-border shadow-md shadow-black/10">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.photoUrl} alt="Foto da refeição enviada" className="h-full w-full object-cover" />
                   </div>
-                )
-              })}
+                </div>
+              )
+            }
+            return (
+              <div key={item.id} className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary">
+                  <CheckCircle2 size={14} className="shrink-0" />
+                  <span>{item.message}</span>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-border bg-[#f8fafc] px-4 py-3 dark:bg-background">
+        {pendingPhoto && (
+          <div className="mx-auto mb-3 flex max-w-md items-center gap-3 rounded-xl border border-border bg-card p-2">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={pendingPhoto} alt="Prévia da foto" className="h-full w-full object-cover" />
             </div>
-          )}
+            <p className="flex-1 text-xs text-white/60">Foto pronta para envio</p>
+            <button
+              type="button"
+              onClick={() => setPendingPhoto(null)}
+              aria-label="Cancelar foto"
+              className="rounded-lg p-1.5 text-white/50 hover:text-danger"
+            >
+              <X size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={sendPhoto}
+              disabled={sending}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-50"
+            >
+              {sending ? 'Enviando...' : 'Enviar foto'}
+            </button>
+          </div>
+        )}
+
+        {showWaterQuick ? (
+          <div className="mx-auto mb-2 flex max-w-md gap-2">
+            {WATER_QUICK_AMOUNTS.map((amount) => (
+              <button
+                key={amount}
+                type="button"
+                onClick={() => sendMessage(`Tomei ${amount}ml de água agora`)}
+                disabled={sending}
+                className="flex-1 rounded-lg border border-primary/40 py-2 text-xs font-semibold text-primary disabled:opacity-50"
+              >
+                {amount >= 1000 ? `${amount / 1000}L` : `${amount}ml`}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setShowWaterQuick(false)}
+              aria-label="Fechar opções de água"
+              className="rounded-lg border border-border px-3 text-white/60"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="mx-auto mb-2 flex max-w-md gap-2 overflow-x-auto pb-1">
+            <ChipButton icon={<Camera size={14} />} label="Foto" onClick={() => handleQuickChip('foto')} disabled={sending} />
+            <ChipButton icon={<Droplet size={14} />} label="Água" onClick={() => handleQuickChip('agua')} disabled={sending} />
+            <ChipButton icon={<Moon size={14} />} label="Sono" onClick={() => handleQuickChip('sono')} disabled={sending} />
+            <ChipButton icon={<Dumbbell size={14} />} label="Treino" onClick={() => handleQuickChip('treino')} disabled={sending} />
+            <ChipButton icon={<Scale size={14} />} label="Peso" onClick={() => handleQuickChip('peso')} disabled={sending} />
+          </div>
+        )}
+
+        <div className="mx-auto flex max-w-md gap-2">
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handlePhotoChosen}
+          />
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={sending}
+            aria-label="Tirar foto da refeição"
+            className="shrink-0 rounded-xl border border-border px-3 text-white/70 disabled:opacity-40"
+          >
+            <Camera size={20} />
+          </button>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder={`Fale com ${coachLabel}...`}
+            className="flex-1 rounded-xl px-4 py-3 outline-none focus:border-primary"
+          />
+          <button
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            className="rounded-xl bg-primary px-5 font-semibold text-black disabled:opacity-40"
+          >
+            Enviar
+          </button>
         </div>
       </div>
 
       <BottomNav />
     </div>
-  )
-}
-
-function ShortcutCard({
-  href,
-  Icon,
-  label,
-  from,
-  to,
-}: {
-  href: string
-  Icon: typeof UtensilsCrossed
-  label: string
-  from: string
-  to: string
-}) {
-  return (
-    <Link href={href}>
-      <div
-        className="flex animate-fade-in-up flex-col items-center justify-center gap-3 rounded-2xl border border-border p-6 text-center shadow-md shadow-black/5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_25px_-8px_var(--glow)]"
-        style={
-          {
-            background: `linear-gradient(160deg, ${from}26 0%, ${to}0d 100%)`,
-            '--glow': `${from}55`,
-          } as React.CSSProperties
-        }
-      >
-        <div
-          className="flex h-12 w-12 items-center justify-center rounded-full"
-          style={{ backgroundColor: `${from}22` }}
-        >
-          <Icon size={24} strokeWidth={2} style={{ color: from }} />
-        </div>
-        <span className="text-xs font-semibold text-white/80">{label}</span>
-      </div>
-    </Link>
   )
 }

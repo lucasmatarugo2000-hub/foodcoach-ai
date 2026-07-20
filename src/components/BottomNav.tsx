@@ -3,16 +3,12 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, UtensilsCrossed, MessageCircle, HeartPulse, Moon, TrendingUp, User } from 'lucide-react'
+import { Home, UtensilsCrossed, HeartPulse, Moon, TrendingUp, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { computeCycleStatus } from '@/lib/cycle'
 import type { Gender, MenstrualCycle } from '@/types'
 
-const OTHER_ITEMS = [
-  { href: '/home', label: 'Home', icon: Home },
-  { href: '/diet', label: 'Dieta', icon: UtensilsCrossed },
-  { href: '/coach', label: 'Coach', icon: MessageCircle },
-] as const
+const OTHER_ITEMS = [{ href: '/diet', label: 'Dieta', icon: UtensilsCrossed }] as const
 
 const TAIL_ITEMS = [
   { href: '/progress', label: 'Evolução', icon: TrendingUp },
@@ -64,6 +60,17 @@ export default function BottomNav() {
         style={{ background: 'linear-gradient(90deg, rgb(var(--color-primary)), rgb(var(--color-secondary)))' }}
       />
       <div className="mx-auto flex max-w-md items-center justify-between px-1 py-2">
+        <Link href="/home" className="flex flex-1 items-center justify-center text-[10px]">
+          <span
+            className={`flex flex-col items-center gap-1 rounded-xl px-1.5 py-1 transition-colors ${
+              pathname.startsWith('/home') ? 'bg-primary/15' : ''
+            }`}
+          >
+            <Home size={20} strokeWidth={2} className="text-primary" />
+            <span className="text-primary">Coach</span>
+          </span>
+        </Link>
+
         {OTHER_ITEMS.map((item) => {
           const active = pathname.startsWith(item.href)
           const Icon = item.icon
